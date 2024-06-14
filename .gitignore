@@ -1,3 +1,7 @@
+# edgar-stock-data
+config.py
+stockdata.csv
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
