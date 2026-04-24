@@ -4,7 +4,7 @@ import re
 import pytest
 
 from app import create_app, db as _db
-from app.models import StockDataEntry, User, UserConfig
+from app.models import Company, User, UserConfig
 
 
 def _csrf(client, path):
@@ -65,7 +65,7 @@ class TestCrossUserIsolation:
         cfg.years = ['2023']
         _db.session.add(cfg)
         # Add a stock entry owned by this user
-        entry = StockDataEntry(user_id=u.id, ticker='TSLA', eps_avg=1.23)
+        entry = Company(user_id=u.id, ticker='TSLA', eps_avg=1.23)
         _db.session.add(entry)
         _db.session.commit()
         return u
@@ -82,7 +82,7 @@ class TestCrossUserIsolation:
         assert b'TSLA' in res.data
 
         # The StockDataEntry for user_b should NOT appear in user_a's response
-        b_entry_id = StockDataEntry.query.filter_by(user_id=user_b.id).first().id
+        b_entry_id = Company.query.filter_by(user_id=user_b.id).first().id
         assert str(b_entry_id).encode() not in res.data or True  # ID not directly shown; check username
         # More robustly: fetch returns only user_a's data
         from unittest.mock import patch
@@ -92,10 +92,10 @@ class TestCrossUserIsolation:
             fetch_res = client.post('/api/fetch')
 
         assert fetch_res.status_code == 200
-        created = StockDataEntry.query.filter_by(user_id=user_a.id, eps_avg=9.99).first()
+        created = Company.query.filter_by(user_id=user_a.id, eps_avg=9.99).first()
         assert created is not None
         # user_b's entry must not be modified
-        b_entry = StockDataEntry.query.filter_by(user_id=user_b.id).first()
+        b_entry = Company.query.filter_by(user_id=user_b.id).first()
         assert b_entry.eps_avg == 1.23
 
 

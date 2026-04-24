@@ -47,8 +47,10 @@
         data.data.forEach(function (e) {
           const row = document.createElement('tr');
           row.dataset.ticker = e.ticker;
+          const companyUrl = '/company/' + encodeURIComponent(e.ticker);
           row.innerHTML = [
-            '<td><strong>' + e.ticker + '</strong></td>',
+            '<td><strong><a href="' + companyUrl + '">' + e.ticker + '</a></strong></td>',
+            '<td>\u2014</td>',
             '<td>' + (e.cik || '\u2014') + '</td>',
             '<td>' + (e.eps_avg != null ? e.eps_avg.toFixed(2) : '\u2014') + '</td>',
             '<td>' + (e.bvps != null ? e.bvps.toFixed(2) : '\u2014') + '</td>',

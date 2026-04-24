@@ -2,8 +2,10 @@ import base64
 import io
 import json
 import logging
+import os
 from datetime import datetime, timezone
 
+import certifi
 import pyotp
 import qrcode
 import qrcode.image.svg
@@ -29,7 +31,22 @@ from app.forms import (
     TwoFactorConfirmForm,
     TwoFactorVerifyForm,
 )
-from app.models import StockDataEntry, User, UserConfig
+import yfinance as yf
+
+from app.models import Company, User, UserConfig
+
+# Override any corporate CA bundle path with certifi's verified bundle so that
+# yfinance's curl_cffi backend can resolve SSL certificates correctly.
+os.environ.setdefault('CURL_CA_BUNDLE', certifi.where())
+os.environ['CURL_CA_BUNDLE'] = certifi.where()
+os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
+
+
+def _yf_price(ticker: str) -> float | None:
+    try:
+        return yf.Ticker(ticker).fast_info['last_price']
+    except Exception:
+        return None
 
 main = Blueprint('main', __name__)
 audit_logger = logging.getLogger('audit')
@@ -222,21 +239,43 @@ def config():
 @login_required
 def dashboard():
     entries = (
-        StockDataEntry.query
+        Company.query
         .filter_by(user_id=current_user.id)
-        .order_by(StockDataEntry.ticker, StockDataEntry.fetched_at.desc())
+        .order_by(Company.ticker, Company.fetched_at.desc())
         .all()
     )
     # Show only the most recent fetch per ticker
     seen: set[str] = set()
-    latest: list[StockDataEntry] = []
+    latest: list[Company] = []
     for entry in entries:
         if entry.ticker not in seen:
             seen.add(entry.ticker)
             latest.append(entry)
 
+    prices: dict[str, float | None] = {}
+    for entry in latest:
+        prices[entry.ticker] = _yf_price(entry.ticker)
+
     cfg = current_user.config
-    return render_template('dashboard.html', entries=latest, config=cfg)
+    return render_template('dashboard.html', entries=latest, prices=prices, config=cfg)
+
+
+@main.route('/company/<ticker>')
+@login_required
+def company(ticker: str):
+    entries = (
+        Company.query
+        .filter_by(user_id=current_user.id, ticker=ticker.upper())
+        .order_by(Company.fetched_at.desc())
+        .all()
+    )
+    if not entries:
+        from flask import abort
+        abort(404)
+
+    price: float | None = _yf_price(ticker)
+
+    return render_template('company.html', ticker=ticker.upper(), entries=entries, price=price)
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +327,7 @@ def api_fetch():
     now = datetime.now(timezone.utc)
     saved = []
     for ticker, data in results.items():
-        entry = StockDataEntry(
+        entry = Company(
             user_id=current_user.id,
             ticker=ticker,
             cik=data.get('cik'),

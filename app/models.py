@@ -20,8 +20,8 @@ class User(UserMixin, db.Model):
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     config = db.relationship('UserConfig', uselist=False, back_populates='user', cascade='all, delete-orphan')
-    stock_data = db.relationship('StockDataEntry', back_populates='user', cascade='all, delete-orphan',
-                                 order_by='StockDataEntry.fetched_at.desc()')
+    stock_data = db.relationship('Company', back_populates='user', cascade='all, delete-orphan',
+                                 order_by='Company.fetched_at.desc()')
 
     def set_password(self, password: str) -> None:
         self.password_hash = generate_password_hash(password, method='pbkdf2:sha256')
@@ -80,8 +80,8 @@ class UserConfig(db.Model):
         return f'<UserConfig user_id={self.user_id}>'
 
 
-class StockDataEntry(db.Model):
-    __tablename__ = 'stock_data_entries'
+class Company(db.Model):
+    __tablename__ = 'companies'
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)

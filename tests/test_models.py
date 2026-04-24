@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.models import StockDataEntry, User, UserConfig
+from app.models import Company, User, UserConfig
 from app import db as _db
 
 
@@ -106,14 +106,14 @@ class TestUserConfigModel:
         assert reloaded.years == ['2021', '2022', '2023']
 
 
-class TestStockDataEntryModel:
+class TestCompanyModel:
     def test_to_dict_contains_required_keys(self, db):
         # Arrange
         u = User(username='dicttest', email='dict@example.com')
         u.set_password('password123')
         _db.session.add(u)
         _db.session.commit()
-        entry = StockDataEntry(
+        entry = Company(
             user_id=u.id,
             ticker='AAPL',
             cik='0000320193',
@@ -143,7 +143,7 @@ class TestStockDataEntryModel:
         u.set_password('password123')
         _db.session.add(u)
         _db.session.commit()
-        entry = StockDataEntry(user_id=u.id, ticker='XYZ')
+        entry = Company(user_id=u.id, ticker='XYZ')
         _db.session.add(entry)
         _db.session.commit()
 

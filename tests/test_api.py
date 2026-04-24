@@ -3,7 +3,7 @@ import re
 import pytest
 import pyotp
 
-from app.models import StockDataEntry, User
+from app.models import Company, User
 
 
 def _csrf(client, path):
@@ -27,7 +27,7 @@ class TestApiFetch:
         tickers = {e['ticker'] for e in data['data']}
         assert 'AAPL' in tickers and 'MSFT' in tickers
 
-        entries = StockDataEntry.query.filter_by(user_id=user.id).all()
+        entries = Company.query.filter_by(user_id=user.id).all()
         assert len(entries) == 2
 
     def test_fetch_no_config(self, client, db):

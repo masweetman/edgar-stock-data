@@ -7,7 +7,7 @@ from flask_admin.contrib.sqla import ModelView
 from flask_login import current_user
 
 from app import db
-from app.models import StockDataEntry, User, UserConfig
+from app.models import Company, User, UserConfig
 
 _audit_logger = logging.getLogger('audit')
 
@@ -53,7 +53,7 @@ class UserConfigAdminView(AdminModelView):
     pass
 
 
-class StockDataAdminView(AdminModelView):
+class CompanyAdminView(AdminModelView):
     can_create = False
     can_edit = False
 
@@ -61,4 +61,4 @@ class StockDataAdminView(AdminModelView):
 def register_admin_views(admin_instance) -> None:
     admin_instance.add_view(UserAdminView(User, db.session, name='Users'))
     admin_instance.add_view(UserConfigAdminView(UserConfig, db.session, name='User Configs'))
-    admin_instance.add_view(StockDataAdminView(StockDataEntry, db.session, name='Stock Data'))
+    admin_instance.add_view(CompanyAdminView(Company, db.session, name='Stock Data'))

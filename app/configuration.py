@@ -20,7 +20,7 @@ class Config:
 class DevelopmentConfig(Config):
     DEBUG = True
     SESSION_COOKIE_SECURE = False
-    EDGAR_VERIFY_SSL: bool = os.environ.get('EDGAR_VERIFY_SSL', 'false').lower() not in ('false', '0', 'no')
+    EDGAR_VERIFY_SSL: bool = os.environ.get('EDGAR_VERIFY_SSL', 'true').lower() not in ('false', '0', 'no')
 
 
 class TestingConfig(Config):
