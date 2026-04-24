@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Configuration — EDGAR Stock Data{% endblock %}
+{% block content %}
+<div class="row justify-content-center mt-4">
+  <div class="col-md-7">
+    <h2 class="mb-4">Configuration</h2>
+    <form method="post" action="{{ url_for('main.config') }}" novalidate>
+      {{ form.hidden_tag() }}
+
+      <div class="mb-3">
+        {{ form.sec_email.label(class="form-label") }}
+        {{ form.sec_email(class="form-control" + (" is-invalid" if form.sec_email.errors else ""),
+                          autocomplete="email", placeholder="your@email.com") }}
+        <div class="form-text">{{ form.sec_email.description }}</div>
+        {% for err in form.sec_email.errors %}
+          <div class="invalid-feedback">{{ err }}</div>
+        {% endfor %}
+      </div>
+
+      <div class="mb-3">
+        {{ form.tickers.label(class="form-label") }}
+        {{ form.tickers(class="form-control" + (" is-invalid" if form.tickers.errors else ""),
+                        rows="6", placeholder="AAPL\nMSFT\nGOOGL") }}
+        <div class="form-text">{{ form.tickers.description }}</div>
+        {% for err in form.tickers.errors %}
+          <div class="invalid-feedback">{{ err }}</div>
+        {% endfor %}
+      </div>
+
+      <div class="mb-3">
+        {{ form.years.label(class="form-label") }}
+        {{ form.years(class="form-control" + (" is-invalid" if form.years.errors else ""),
+                      rows="4", placeholder="2021\n2022\n2023") }}
+        <div class="form-text">{{ form.years.description }} EPS will be averaged across these years.</div>
+        {% for err in form.years.errors %}
+          <div class="invalid-feedback">{{ err }}</div>
+        {% endfor %}
+      </div>
+
+      <button type="submit" class="btn btn-primary">Save & Go to Dashboard</button>
+      <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-secondary ms-2">Cancel</a>
+    </form>
+  </div>
+</div>
+{% endblock %}

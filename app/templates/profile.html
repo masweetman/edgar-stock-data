@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Profile — EDGAR Stock Data{% endblock %}
+{% block content %}
+<div class="row mt-4">
+  <div class="col-md-6">
+    <h2 class="mb-4">Profile</h2>
+    <form method="post" action="{{ url_for('main.profile') }}" novalidate>
+      {{ form.hidden_tag() }}
+
+      <div class="mb-3">
+        {{ form.email.label(class="form-label") }}
+        {{ form.email(class="form-control" + (" is-invalid" if form.email.errors else ""), autocomplete="email") }}
+        {% for err in form.email.errors %}
+          <div class="invalid-feedback">{{ err }}</div>
+        {% endfor %}
+      </div>
+
+      <hr>
+      <h5>Change Password</h5>
+      <p class="text-muted small">Leave blank to keep your current password.</p>
+
+      <div class="mb-3">
+        {{ form.current_password.label(class="form-label") }}
+        {{ form.current_password(class="form-control" + (" is-invalid" if form.current_password.errors else ""), autocomplete="current-password") }}
+        {% for err in form.current_password.errors %}
+          <div class="invalid-feedback">{{ err }}</div>
+        {% endfor %}
+      </div>
+
+      <div class="mb-3">
+        {{ form.new_password.label(class="form-label") }}
+        {{ form.new_password(class="form-control" + (" is-invalid" if form.new_password.errors else ""), autocomplete="new-password") }}
+        <div class="form-text">Minimum 8 characters.</div>
+        {% for err in form.new_password.errors %}
+          <div class="invalid-feedback">{{ err }}</div>
+        {% endfor %}
+      </div>
+
+      <div class="mb-3">
+        {{ form.new_password_confirm.label(class="form-label") }}
+        {{ form.new_password_confirm(class="form-control" + (" is-invalid" if form.new_password_confirm.errors else ""), autocomplete="new-password") }}
+        {% for err in form.new_password_confirm.errors %}
+          <div class="invalid-feedback">{{ err }}</div>
+        {% endfor %}
+      </div>
+
+      <button type="submit" class="btn btn-primary">Save Changes</button>
+    </form>
+  </div>
+
+  <div class="col-md-5 offset-md-1 mt-4 mt-md-0">
+    <h4>Two-Factor Authentication</h4>
+    {% if current_user.two_factor_enabled %}
+      <div class="alert alert-success">2FA is <strong>enabled</strong>.</div>
+      <p>To disable 2FA, enter your password and authenticator code below.</p>
+      <div id="disable-2fa-form">
+        <div class="mb-3">
+          <label class="form-label" for="disable-password">Current Password</label>
+          <input type="password" class="form-control" id="disable-password" autocomplete="current-password">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="disable-code">Authenticator Code</label>
+          <input type="text" class="form-control" id="disable-code" inputmode="numeric" maxlength="6" autocomplete="one-time-code">
+        </div>
+      <button class="btn btn-danger" id="btn-disable-2fa"
+              data-disable-url="{{ url_for('main.api_2fa_disable') }}">Disable 2FA</button>
+        <div id="disable-2fa-msg" class="mt-2"></div>
+      </div>
+    {% else %}
+      <div class="alert alert-secondary">2FA is <strong>not enabled</strong>.</div>
+      <button class="btn btn-outline-primary" id="btn-setup-2fa"
+              data-setup-url="{{ url_for('main.api_2fa_setup') }}">Set up 2FA</button>
+
+      <div id="setup-2fa-section" class="mt-3" style="display:none;">
+        <p>Scan the QR code with your authenticator app, then enter the code to confirm.</p>
+        <img id="qr-image" src="" alt="QR Code" class="mb-3 d-block">
+        <p class="small text-muted">Manual entry: <code id="totp-secret"></code></p>
+        <div class="mb-3">
+          <label class="form-label" for="enable-password">Current Password</label>
+          <input type="password" class="form-control" id="enable-password" autocomplete="current-password">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="enable-code">Authenticator Code</label>
+          <input type="text" class="form-control" id="enable-code" inputmode="numeric" maxlength="6" autocomplete="one-time-code">
+        </div>
+        <button class="btn btn-success" id="btn-enable-2fa"
+                data-enable-url="{{ url_for('main.api_2fa_enable') }}">Enable 2FA</button>
+        <div id="enable-2fa-msg" class="mt-2"></div>
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/profile.js') }}"></script>
+{% endblock %}
