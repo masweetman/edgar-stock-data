@@ -10,6 +10,7 @@ Group=nogroup
 WorkingDirectory=/srv/edgar-stock-data
 EnvironmentFile=/srv/edgar-stock-data/.env
 Environment=FLASK_CONFIG=production
+Environment=HOME=/srv/edgar-stock-data
 
 # systemd creates /run/edgar-stock-data/ and removes it on stop
 RuntimeDirectory=edgar-stock-data
