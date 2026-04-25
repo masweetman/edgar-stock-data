@@ -34,7 +34,7 @@ from app.forms import (
 )
 import yfinance as yf
 
-from app.models import AnnualEPS, Company, User, UserConfig
+from app.models import AnnualEPS, Company, Dividend, User, UserConfig
 
 # Override any corporate CA bundle path with certifi's verified bundle so that
 # yfinance's curl_cffi backend can resolve SSL certificates correctly.
@@ -292,6 +292,7 @@ def company(ticker: str):
         mos_signal=signal,
         discount_rate=discount_rate,
         annual_eps=latest.annual_eps_records,
+        dividends=latest.dividend_records,
     )
 
 
@@ -396,6 +397,22 @@ def api_fetch():
             most_recent = annual_map.get(max_year)
             if most_recent and most_recent.avg_6yr is not None:
                 entry.eps_avg = most_recent.avg_6yr
+
+        for record in data.get('dividend_history', []):
+            div_row = Dividend.query.filter_by(
+                company_id=entry.id, dividend_date=record['dividend_date']
+            ).first()
+            if div_row is None:
+                div_row = Dividend(
+                    company_id=entry.id,
+                    dividend_date=record['dividend_date'],
+                    dividend_period=record['dividend_period'],
+                    value=record['value'],
+                )
+                db.session.add(div_row)
+            else:
+                div_row.dividend_period = record['dividend_period']
+                div_row.value = record['value']
 
         saved.append(entry)
 

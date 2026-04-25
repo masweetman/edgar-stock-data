@@ -100,6 +100,10 @@ class Company(db.Model):
         'AnnualEPS', back_populates='company', cascade='all, delete-orphan',
         order_by='AnnualEPS.year',
     )
+    dividend_records = db.relationship(
+        'Dividend', back_populates='company', cascade='all, delete-orphan',
+        order_by='Dividend.dividend_date.desc()',
+    )
 
     def to_dict(self) -> dict:
         return {
@@ -147,3 +151,21 @@ class AnnualEPS(db.Model):
 
     def __repr__(self) -> str:
         return f'<AnnualEPS company_id={self.company_id} year={self.year} value={self.value}>'
+
+
+class Dividend(db.Model):
+    __tablename__ = 'dividends'
+    __table_args__ = (
+        db.UniqueConstraint('company_id', 'dividend_date', name='uq_dividend_company_date'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False, index=True)
+    dividend_date = db.Column(db.String(20), nullable=False)
+    dividend_period = db.Column(db.String(20), nullable=False)
+    value = db.Column(db.Float, nullable=False)
+
+    company = db.relationship('Company', back_populates='dividend_records')
+
+    def __repr__(self) -> str:
+        return f'<Dividend company_id={self.company_id} date={self.dividend_date} value={self.value}>'

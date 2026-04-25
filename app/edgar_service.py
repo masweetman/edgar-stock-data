@@ -96,6 +96,7 @@ def _fetch_ticker(ticker: str) -> dict[str, Any]:
         'bvps': None,
         'div': None,
         'div_date': None,
+        'dividend_history': [],
         'error': None,
         # Buffett-analysis fields
         'net_income_history': {},
@@ -160,6 +161,7 @@ def _fetch_ticker(ticker: str) -> dict[str, Any]:
     entry['div'] = div
     entry['div_date'] = div_date
     logger.info('[%s] Dividend: %s on %s', ticker, div, div_date)
+    entry['dividend_history'] = _get_dividend_history(df, ticker)
 
     # --- Buffett-analysis data (10-year history series) ---
     entry['net_income_history'] = _get_annual_series(df, _CONCEPT_NET_INCOME, ticker)
@@ -392,6 +394,71 @@ def _get_dividends(df, ticker: str = '') -> tuple[float | None, str | None]:
 
     logger.info('[%s][DIV] No dividend data found', ticker)
     return None, None
+
+
+def _get_dividend_history(df, ticker: str = '') -> list[dict]:
+    """Return a list of raw per-period dividend records for all available filings.
+
+    Tries us-gaap:CommonStockDividendsPerShareDeclared first, then
+    us-gaap:CommonStockDividendsPerShareCashPaid. Prefers declared over paid
+    when both have a record for the same period_end date.
+
+    Returns a list of dicts with keys:
+        dividend_date (str), dividend_period (str), value (float)
+    sorted by dividend_date descending.
+    """
+    def _period_label(period_start, period_end) -> str:
+        try:
+            from datetime import date as _date
+            def _to_date(d):
+                if isinstance(d, _date):
+                    return d
+                return _date.fromisoformat(str(d)[:10])
+            days = (_to_date(period_end) - _to_date(period_start)).days
+            if 14 <= days <= 59:
+                return 'monthly'
+            elif 60 <= days <= 120:
+                return 'quarterly'
+            elif 121 <= days <= 270:
+                return 'semi-annual'
+            elif 271 <= days <= 400:
+                return 'annual'
+        except Exception:
+            pass
+        return 'unknown'
+
+    # keyed by dividend_date string; declared wins over paid
+    records: dict[str, dict] = {}
+
+    for concept in (_CONCEPT_DIV_DECLARED, _CONCEPT_DIV_PAID):
+        try:
+            sub = df[df['concept'] == concept].dropna(subset=['numeric_value'])
+            if sub.empty:
+                continue
+            non_fy = sub[sub['fiscal_period'] != 'FY'] if 'fiscal_period' in sub.columns else sub
+            candidates = non_fy if not non_fy.empty else sub
+
+            for _, row in candidates.iterrows():
+                period_end = row.get('period_end')
+                if period_end is None:
+                    continue
+                div_date = str(period_end)[:10]
+                # Don't overwrite a record already set by the preferred concept
+                if div_date in records:
+                    continue
+                period_start = row.get('period_start')
+                period = _period_label(period_start, period_end) if period_start is not None else 'unknown'
+                records[div_date] = {
+                    'dividend_date': div_date,
+                    'dividend_period': period,
+                    'value': round(float(row['numeric_value']), 4),
+                }
+        except Exception as exc:
+            logger.debug('[%s][DIV_HIST] %s failed: %s', ticker, concept, exc)
+
+    result = sorted(records.values(), key=lambda r: r['dividend_date'], reverse=True)
+    logger.info('[%s][DIV_HIST] %d dividend records found', ticker, len(result))
+    return result
 
 
 def _latest_annual_value(df, concept: str, ticker: str = '') -> float | None:

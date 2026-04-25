@@ -304,6 +304,42 @@
   {% endif %}
 </div>
 
+{# ── Dividends table ── #}
+<div class="card mb-4">
+  <div class="card-header fw-semibold">
+    Dividends
+    <span class="float-end small fw-normal text-muted">Per-period declared/paid dividends from SEC filings</span>
+  </div>
+  {% if dividends %}
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-sm table-hover mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>Date</th>
+            <th>Period</th>
+            <th>Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for d in dividends %}
+          <tr>
+            <td>{{ d.dividend_date }}</td>
+            <td>{{ d.dividend_period }}</td>
+            <td>{{ '%.4f' | format(d.value) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <div class="card-body">
+    <span class="text-secondary">No dividend data available. Fetch data to populate this table.</span>
+  </div>
+  {% endif %}
+</div>
+
 {# ── Historical fetch table ── #}
 <h5 class="mb-2">Fetch History</h5>
 <div class="table-responsive">
