@@ -83,10 +83,11 @@ class UserConfig(db.Model):
 
 class Company(db.Model):
     __tablename__ = 'companies'
+    __table_args__ = (db.UniqueConstraint('user_id', 'ticker', name='uq_company_user_ticker'),)
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
-    ticker = db.Column(db.String(20), nullable=False)
+    ticker = db.Column(db.String(20), nullable=False, index=True)
     cik = db.Column(db.String(20), nullable=True)
     eps_avg = db.Column(db.Float, nullable=True)
     bvps = db.Column(db.Float, nullable=True)

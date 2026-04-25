@@ -12,6 +12,7 @@ Annual facts are identified by fiscal_period == 'FY'.
 
 import logging
 import statistics
+from datetime import date
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -251,26 +252,104 @@ def _get_bvps(df, ticker: str = '') -> float | None:
     return None
 
 
+def _annualise_dividend(val: float, period_start, period_end, ticker: str = '') -> float | None:
+    """Return the estimated annual dividend given a per-period value and its date range.
+
+    Computes the period duration in days and scales accordingly:
+        14–59 days  → monthly  (× 12)
+        60–120 days → quarterly (× 4)
+        121–270 days → semi-annual (× 2)
+        271–400 days → annual (× 1)
+    Periods outside these bands are considered unreliable and return None.
+    """
+    try:
+        def _to_date(d) -> date:
+            if isinstance(d, date):
+                return d
+            return date.fromisoformat(str(d)[:10])
+
+        start = _to_date(period_start)
+        end = _to_date(period_end)
+        days = (end - start).days
+
+        if 14 <= days <= 59:
+            multiplier = 12
+            period_label = 'monthly'
+        elif 60 <= days <= 120:
+            multiplier = 4
+            period_label = 'quarterly'
+        elif 121 <= days <= 270:
+            multiplier = 2
+            period_label = 'semi-annual'
+        elif 271 <= days <= 400:
+            multiplier = 1
+            period_label = 'annual'
+        else:
+            logger.warning(
+                '[%s][DIV] Period duration %d days is outside expected bands '
+                '(start=%s, end=%s) — skipping this row',
+                ticker, days, start, end,
+            )
+            return None
+
+        annualised = round(val * multiplier, 4)
+        logger.info(
+            '[%s][DIV] Annualised: %.4f (%.4f × %d, %s, %d-day period)',
+            ticker, annualised, val, multiplier, period_label, days,
+        )
+        return annualised
+    except Exception as exc:
+        logger.warning('[%s][DIV] Could not annualise dividend: %s', ticker, exc)
+        return None
+
+
 def _get_dividends(df, ticker: str = '') -> tuple[float | None, str | None]:
-    """Return (dividend_per_share, date) from the most recent dividend filing.
+    """Return (estimated_annual_dividend_per_share, date) from the most recent dividend filing.
 
     Checks us-gaap:CommonStockDividendsPerShareDeclared then
     us-gaap:CommonStockDividendsPerShareCashPaid.
+
+    The returned dividend value is an estimated *annual* figure, derived by
+    scaling the per-period declared/paid amount by the number of periods per year,
+    inferred from the filing's period_start / period_end duration.
+
+    Annual filings (fiscal_period == 'FY') are used only as a last resort because
+    they are already full-year totals — using them with any multiplier would
+    over-count. Non-FY rows (quarterly declarations etc.) are preferred.
     """
-    for concept in (
-        _CONCEPT_DIV_DECLARED,
-        _CONCEPT_DIV_PAID,
-    ):
+    for concept in (_CONCEPT_DIV_DECLARED, _CONCEPT_DIV_PAID):
         try:
             sub = df[df['concept'] == concept].dropna(subset=['numeric_value'])
             if sub.empty:
                 logger.info('[%s][DIV] Concept %s not found', ticker, concept)
                 continue
-            latest = sub.sort_values('period_end').iloc[-1]
-            val = float(latest['numeric_value'])
-            date = str(latest['period_end'])
-            logger.info('[%s][DIV] Found %s: %s on %s', ticker, concept, val, date)
-            return val, date
+
+            # Prefer non-FY rows (per-declaration/quarterly) over FY aggregates
+            non_fy = sub[sub['fiscal_period'] != 'FY'] if 'fiscal_period' in sub.columns else sub
+            candidates = non_fy if not non_fy.empty else sub
+
+            # Try each candidate from most-recent to least-recent
+            for _, row in candidates.sort_values('period_end', ascending=False).iterrows():
+                val = float(row['numeric_value'])
+                period_start = row.get('period_start')
+                period_end = row.get('period_end')
+                div_date = str(period_end)
+
+                if period_start is None or period_end is None:
+                    # No date range — assume quarterly as a conservative default
+                    logger.warning(
+                        '[%s][DIV] Missing period_start/period_end for %s — assuming quarterly',
+                        ticker, concept,
+                    )
+                    annualised = round(val * 4, 4)
+                    logger.info('[%s][DIV] Annualised (assumed quarterly): %.4f', ticker, annualised)
+                    return annualised, div_date
+
+                annualised = _annualise_dividend(val, period_start, period_end, ticker)
+                if annualised is not None:
+                    return annualised, div_date
+
+            logger.info('[%s][DIV] No usable rows found for %s', ticker, concept)
         except Exception as exc:
             logger.debug('[%s][DIV] %s failed: %s', ticker, concept, exc)
 

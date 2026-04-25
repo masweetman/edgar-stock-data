@@ -349,21 +349,20 @@ def api_fetch():
     saved = []
     for ticker, data in results.items():
         buffett = run_buffett_analysis(data, discount_rate)
-        entry = Company(
-            user_id=current_user.id,
-            ticker=ticker,
-            cik=data.get('cik'),
-            eps_avg=data.get('eps_avg'),
-            bvps=data.get('bvps'),
-            div=data.get('div'),
-            div_date=data.get('div_date'),
-            owner_earnings=buffett.get('owner_earnings'),
-            intrinsic_value=buffett.get('intrinsic_value'),
-            quality_score=buffett.get('quality_score'),
-            growth_rate_used=buffett.get('growth_rate_used'),
-            fetched_at=now,
-        )
-        db.session.add(entry)
+        entry = Company.query.filter_by(user_id=current_user.id, ticker=ticker).first()
+        if entry is None:
+            entry = Company(user_id=current_user.id, ticker=ticker)
+            db.session.add(entry)
+        entry.cik = data.get('cik')
+        entry.eps_avg = data.get('eps_avg')
+        entry.bvps = data.get('bvps')
+        entry.div = data.get('div')
+        entry.div_date = data.get('div_date')
+        entry.owner_earnings = buffett.get('owner_earnings')
+        entry.intrinsic_value = buffett.get('intrinsic_value')
+        entry.quality_score = buffett.get('quality_score')
+        entry.growth_rate_used = buffett.get('growth_rate_used')
+        entry.fetched_at = now
         saved.append(entry)
 
     db.session.commit()

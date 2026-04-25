@@ -44,15 +44,16 @@
   <table class="table table-sm table-hover">
     <thead class="table-dark">
       <tr>
-        <th>Ticker</th>
-        <th>Live Price</th>
-        <th>Avg EPS</th>
-        <th>BVPS</th>
-        <th>Dividend</th>
-        <th title="Price ÷ Average EPS">P/E</th>
-        <th title="Price ÷ Book Value Per Share">P/BVPS</th>
-        <th title="0–100 Buffett quality score">Quality</th>
-        <th title="Margin of Safety vs Intrinsic Value">MOS</th>
+        <th class="sortable" data-col="0" style="cursor:pointer;user-select:none">Ticker <span class="sort-arrow"></span></th>
+        <th class="sortable" data-col="1" style="cursor:pointer;user-select:none">Live Price <span class="sort-arrow"></span></th>
+        <th class="sortable" data-col="2" style="cursor:pointer;user-select:none">Avg EPS <span class="sort-arrow"></span></th>
+        <th class="sortable" data-col="3" style="cursor:pointer;user-select:none">BVPS <span class="sort-arrow"></span></th>
+        <th class="sortable" data-col="4" style="cursor:pointer;user-select:none">Dividend <span class="sort-arrow"></span></th>
+        <th class="sortable" data-col="5" title="Annual Dividend ÷ Live Price" style="cursor:pointer;user-select:none">Yield <span class="sort-arrow"></span></th>
+        <th class="sortable" data-col="6" title="Price ÷ Average EPS" style="cursor:pointer;user-select:none">P/E <span class="sort-arrow"></span></th>
+        <th class="sortable" data-col="7" title="Price ÷ Book Value Per Share" style="cursor:pointer;user-select:none">P/BVPS <span class="sort-arrow"></span></th>
+        <th class="sortable" data-col="8" title="0–100 Buffett quality score" style="cursor:pointer;user-select:none">Quality <span class="sort-arrow"></span></th>
+        <th class="sortable" data-col="9" title="Margin of Safety vs Intrinsic Value" style="cursor:pointer;user-select:none">MOS <span class="sort-arrow"></span></th>
       </tr>
     </thead>
     <tbody id="data-tbody">
@@ -61,12 +62,14 @@
       {% set pe = (price / e.eps_avg) if (price is not none and e.eps_avg and e.eps_avg > 0) else none %}
       {% set pbvps = (price / e.bvps) if (price is not none and e.bvps and e.bvps > 0) else none %}
       {% set mos = (1 - price / e.intrinsic_value) if (price is not none and e.intrinsic_value and e.intrinsic_value > 0) else none %}
+      {% set yld = (e.div / price * 100) if (price is not none and price > 0 and e.div is not none) else none %}
       <tr data-ticker="{{ e.ticker }}">
         <td><strong><a href="{{ url_for('main.company', ticker=e.ticker) }}">{{ e.ticker }}</a></strong></td>
         <td>{{ '$%.2f' | format(price) if price is not none else '—' }}</td>
         <td>{{ '%.2f' | format(e.eps_avg) if e.eps_avg is not none else '—' }}</td>
         <td>{{ '%.2f' | format(e.bvps) if e.bvps is not none else '—' }}</td>
         <td>{{ '%.4f' | format(e.div) if e.div is not none else '—' }}</td>
+        <td>{{ '%.2f' | format(yld) + '%' if yld is not none else '—' }}</td>
         <td>{{ '%.1f' | format(pe) if pe is not none else '—' }}</td>
         <td>{{ '%.2f' | format(pbvps) if pbvps is not none else '—' }}</td>
         <td>
