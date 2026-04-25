@@ -356,6 +356,50 @@
   {% endif %}
 </div>
 
+{# ── SEC Filings ── #}
+<div class="card mb-4">
+  <div class="card-header fw-semibold">
+    SEC Filings
+    <span class="float-end small fw-normal text-muted">Most-recent 10-K and 10-Q from EDGAR</span>
+  </div>
+  {% if filings %}
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-sm table-hover mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>Type</th>
+            <th>Filing Date</th>
+            <th>Report Date</th>
+            <th>View</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for f in filings %}
+          <tr>
+            <td><span class="badge bg-secondary">{{ f.filing_type }}</span></td>
+            <td>{{ f.filing_date or '—' }}</td>
+            <td>{{ f.report_date or '—' }}</td>
+            <td>
+              {% if f.filing_path %}
+                <a href="{{ url_for('main.view_filing', filing_id=f.id) }}" target="_blank" rel="noopener noreferrer" class="btn btn-outline-primary btn-sm">View PDF</a>
+              {% else %}
+                <span class="text-secondary small">Not downloaded</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <div class="card-body">
+    <span class="text-secondary">No filings available. Fetch data to download 10-K and 10-Q PDFs.</span>
+  </div>
+  {% endif %}
+</div>
+
 {# ── Historical fetch table ── #}
 <h5 class="mb-2">Fetch History</h5>
 <div class="table-responsive">

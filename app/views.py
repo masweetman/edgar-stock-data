@@ -4,6 +4,7 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 
 import certifi
 import pyotp
@@ -16,6 +17,7 @@ from flask import (
     redirect,
     render_template,
     request,
+    send_file,
     session,
     url_for,
 )
@@ -24,6 +26,7 @@ from flask_login import current_user, login_required, login_user, logout_user
 from app import db, limiter
 from app.buffett_calculator import run_buffett_analysis
 from app.edgar_service import fetch_data
+from app.filing_service import fetch_latest_filings
 from app.forms import (
     ConfigForm,
     LoginForm,
@@ -34,7 +37,7 @@ from app.forms import (
 )
 import yfinance as yf
 
-from app.models import AnnualEPS, Company, Dividend, User, UserConfig
+from app.models import AnnualEPS, Company, Dividend, Filing, User, UserConfig
 
 # Override any corporate CA bundle path with certifi's verified bundle so that
 # yfinance's curl_cffi backend can resolve SSL certificates correctly.
@@ -283,6 +286,13 @@ def company(ticker: str):
     signal: str = _mos_signal(mos)
     discount_rate = current_user.config.discount_rate if current_user.config else 0.09
 
+    filings = (
+        Filing.query
+        .filter_by(company_id=latest.id)
+        .order_by(Filing.filing_date.desc())
+        .all()
+    )
+
     return render_template(
         'company.html',
         ticker=ticker.upper(),
@@ -293,7 +303,39 @@ def company(ticker: str):
         discount_rate=discount_rate,
         annual_eps=latest.annual_eps_records,
         dividends=latest.dividend_records,
+        filings=filings,
     )
+
+
+@main.route('/filings/<int:filing_id>')
+@login_required
+def view_filing(filing_id: int):
+    """Serve a stored SEC filing PDF inline to the authenticated user."""
+    from flask import abort
+
+    filing = db.session.get(Filing, filing_id)
+    if filing is None:
+        abort(404)
+
+    # Authorise: the user must have this ticker in their watchlist
+    cfg = current_user.config
+    if cfg is None or filing.company.ticker not in cfg.tickers:
+        abort(403)
+
+    # Resolve and validate the path to prevent directory traversal
+    storage_path = Path(current_app.config.get('FILING_STORAGE_PATH', 'instance/filings')).resolve()
+    if not filing.filing_path:
+        abort(404)
+
+    abs_path = (storage_path / filing.filing_path).resolve()
+    # Guard: resolved path must be inside the storage directory
+    if not str(abs_path).startswith(str(storage_path)):
+        abort(403)
+
+    if not abs_path.exists():
+        abort(404)
+
+    return send_file(str(abs_path), mimetype='application/pdf')
 
 
 # ---------------------------------------------------------------------------
@@ -414,6 +456,32 @@ def api_fetch():
             else:
                 div_row.dividend_period = record['dividend_period']
                 div_row.value = record['value']
+
+        # --- SEC Filings (10-K / 10-Q PDFs) ---
+        if entry.cik:
+            try:
+                storage_path = current_app.config.get('FILING_STORAGE_PATH', 'instance/filings')
+                filing_records = fetch_latest_filings(entry.ticker, entry.cik, storage_path, sec_email=cfg.sec_email)
+                for rec in filing_records:
+                    filing_row = Filing.query.filter_by(
+                        company_id=entry.id,
+                        filing_type=rec['filing_type'],
+                        filing_date=rec['filing_date'],
+                    ).first()
+                    if filing_row is None:
+                        filing_row = Filing(
+                            company_id=entry.id,
+                            filing_type=rec['filing_type'],
+                            filing_date=rec['filing_date'],
+                        )
+                        db.session.add(filing_row)
+                    filing_row.report_date = rec['report_date']
+                    filing_row.accession_number = rec['accession_number']
+                    filing_row.filing_path = rec['filing_path']
+            except Exception as exc:
+                logging.getLogger('app').warning(
+                    'Filing download failed for %s: %s', entry.ticker, exc
+                )
 
         saved.append(entry)
 

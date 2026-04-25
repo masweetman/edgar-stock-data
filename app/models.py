@@ -105,6 +105,10 @@ class Company(db.Model):
         'Dividend', back_populates='company', cascade='all, delete-orphan',
         order_by='Dividend.dividend_date.desc()',
     )
+    filings = db.relationship(
+        'Filing', back_populates='company', cascade='all, delete-orphan',
+        order_by='Filing.filing_date.desc()',
+    )
 
     def to_dict(self) -> dict:
         return {
@@ -171,3 +175,23 @@ class Dividend(db.Model):
 
     def __repr__(self) -> str:
         return f'<Dividend company_id={self.company_id} date={self.dividend_date} value={self.value}>'
+
+
+class Filing(db.Model):
+    __tablename__ = 'filings'
+    __table_args__ = (
+        db.UniqueConstraint('company_id', 'filing_type', 'filing_date', name='uq_filing_company_type_date'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False, index=True)
+    filing_type = db.Column(db.String(10), nullable=False)   # "10-K" or "10-Q"
+    filing_date = db.Column(db.String(20), nullable=False)   # e.g. "2024-11-01"
+    report_date = db.Column(db.String(20), nullable=True)    # fiscal period end date
+    accession_number = db.Column(db.String(30), nullable=True)
+    filing_path = db.Column(db.String(512), nullable=True)   # relative path to PDF on disk
+
+    company = db.relationship('Company', back_populates='filings')
+
+    def __repr__(self) -> str:
+        return f'<Filing company_id={self.company_id} type={self.filing_type} date={self.filing_date}>'

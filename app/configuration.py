@@ -15,6 +15,8 @@ class Config:
     # SSL verification for SEC EDGAR requests. Always True in production.
     # Override via EDGAR_VERIFY_SSL=false env var only in controlled environments.
     EDGAR_VERIFY_SSL: bool = os.environ.get('EDGAR_VERIFY_SSL', 'true').lower() not in ('false', '0', 'no')
+    # Base directory for storing downloaded SEC filing PDFs.
+    FILING_STORAGE_PATH: str = os.environ.get('FILING_STORAGE_PATH', 'instance/filings')
 
 
 class DevelopmentConfig(Config):
