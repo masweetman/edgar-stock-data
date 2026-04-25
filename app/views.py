@@ -34,7 +34,7 @@ from app.forms import (
 )
 import yfinance as yf
 
-from app.models import Company, User, UserConfig
+from app.models import AnnualEPS, Company, User, UserConfig
 
 # Override any corporate CA bundle path with certifi's verified bundle so that
 # yfinance's curl_cffi backend can resolve SSL certificates correctly.
@@ -291,6 +291,7 @@ def company(ticker: str):
         mos=mos,
         mos_signal=signal,
         discount_rate=discount_rate,
+        annual_eps=latest.annual_eps_records,
     )
 
 
@@ -370,6 +371,32 @@ def api_fetch():
         entry.earnings_consistency_label = buffett.get('earnings_consistency_label')
         entry.predictability_rating = buffett.get('predictability_rating')
         entry.fetched_at = now
+        db.session.flush()  # ensure entry.id is assigned for new Company rows
+
+        eps_dict = data.get('eps_history', {})
+        annual_map: dict[int, AnnualEPS] = {}
+
+        for year, value in eps_dict.items():
+            annual = AnnualEPS.query.filter_by(company_id=entry.id, year=year).first()
+            if annual is None:
+                annual = AnnualEPS(company_id=entry.id, year=year, value=value)
+                db.session.add(annual)
+            else:
+                annual.value = value
+            annual_map[year] = annual
+
+        for year, annual in annual_map.items():
+            vals_3yr = [eps_dict[y] for y in range(year - 2, year + 1) if y in eps_dict]
+            vals_6yr = [eps_dict[y] for y in range(year - 5, year + 1) if y in eps_dict]
+            annual.avg_3yr = round(sum(vals_3yr) / len(vals_3yr), 2) if vals_3yr else None
+            annual.avg_6yr = round(sum(vals_6yr) / len(vals_6yr), 2) if vals_6yr else None
+
+        if eps_dict:
+            max_year = max(eps_dict.keys())
+            most_recent = annual_map.get(max_year)
+            if most_recent and most_recent.avg_6yr is not None:
+                entry.eps_avg = most_recent.avg_6yr
+
         saved.append(entry)
 
     db.session.commit()

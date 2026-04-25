@@ -33,11 +33,16 @@ _CONCEPT_NET_INCOME = 'us-gaap:NetIncomeLoss'
 _CONCEPT_DA = 'us-gaap:DepreciationDepletionAndAmortization'
 _CONCEPT_DA_ALT = 'us-gaap:DepreciationAndAmortization'
 _CONCEPT_CAPEX = 'us-gaap:PaymentsToAcquirePropertyPlantAndEquipment'
+_CONCEPT_CAPEX_ALT = 'us-gaap:CapitalExpenditure'
 _CONCEPT_REVENUE = 'us-gaap:Revenues'
 _CONCEPT_REVENUE_ALT = 'us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax'
+_CONCEPT_REVENUE_ALT2 = 'us-gaap:SalesRevenueNet'
+_CONCEPT_REVENUE_ALT3 = 'us-gaap:SalesRevenueGoodsNet'
 _CONCEPT_OP_INCOME = 'us-gaap:OperatingIncomeLoss'
 _CONCEPT_LT_DEBT = 'us-gaap:LongTermDebt'
 _CONCEPT_LT_DEBT_ALT = 'us-gaap:LongTermDebtNoncurrent'
+_CONCEPT_ST_DEBT = 'us-gaap:ShortTermBorrowings'
+_CONCEPT_ST_DEBT_ALT = 'us-gaap:DebtCurrent'
 _CONCEPT_EQUITY = 'us-gaap:StockholdersEquity'
 # Additional concepts for EV-→Equity bridge and cross-checks
 _CONCEPT_CASH = 'us-gaap:CashAndCashEquivalentsAtCarryingValue'
@@ -87,6 +92,7 @@ def _fetch_ticker(ticker: str) -> dict[str, Any]:
     entry: dict[str, Any] = {
         'cik': None,
         'eps_avg': None,
+        'eps_history': {},
         'bvps': None,
         'div': None,
         'div_date': None,
@@ -99,9 +105,11 @@ def _fetch_ticker(ticker: str) -> dict[str, Any]:
         'operating_income_history': {},
         'op_cashflow_history': {},
         'long_term_debt': None,
+        'short_term_debt': None,
         'cash': None,
         'net_debt': None,
         'equity': None,
+        'equity_history': {},
         'shares_outstanding': None,
     }
 
@@ -140,6 +148,8 @@ def _fetch_ticker(ticker: str) -> dict[str, Any]:
     # --- EPS (average diluted EPS across the 6 most recent calendar years) ---
     entry['eps_avg'] = _get_eps_avg(df, ticker)
     logger.info('[%s] EPS avg: %s', ticker, entry['eps_avg'])
+    entry['eps_history'] = _get_annual_series(df, _CONCEPT_EPS_DILUTED, ticker)
+    logger.info('[%s] EPS history: %s', ticker, entry['eps_history'])
 
     # --- Book Value Per Share ---
     entry['bvps'] = _get_bvps(df, ticker)
@@ -155,27 +165,36 @@ def _fetch_ticker(ticker: str) -> dict[str, Any]:
     entry['net_income_history'] = _get_annual_series(df, _CONCEPT_NET_INCOME, ticker)
     entry['da_history'] = _get_annual_series_with_fallback(
         df, _CONCEPT_DA, _CONCEPT_DA_ALT, ticker)
-    entry['capex_history'] = _get_annual_series(df, _CONCEPT_CAPEX, ticker)
-    entry['revenue_history'] = _get_annual_series_with_fallback(
-        df, _CONCEPT_REVENUE, _CONCEPT_REVENUE_ALT, ticker)
+    entry['capex_history'] = _get_annual_series_with_fallback(
+        df, _CONCEPT_CAPEX, _CONCEPT_CAPEX_ALT, ticker)
+    entry['revenue_history'] = _get_annual_series_with_fallbacks(
+        df,
+        [_CONCEPT_REVENUE, _CONCEPT_REVENUE_ALT, _CONCEPT_REVENUE_ALT2, _CONCEPT_REVENUE_ALT3],
+        ticker,
+    )
     entry['operating_income_history'] = _get_annual_series(df, _CONCEPT_OP_INCOME, ticker)
     entry['long_term_debt'] = _latest_annual_value_with_fallback(
         df, _CONCEPT_LT_DEBT, _CONCEPT_LT_DEBT_ALT, ticker)
+    entry['short_term_debt'] = _latest_annual_value_with_fallback(
+        df, _CONCEPT_ST_DEBT, _CONCEPT_ST_DEBT_ALT, ticker)
     entry['cash'] = _latest_annual_value_with_fallback(
         df, _CONCEPT_CASH, _CONCEPT_CASH_ALT, ticker)
     entry['op_cashflow_history'] = _get_annual_series(df, _CONCEPT_OP_CASHFLOW, ticker)
     entry['equity'] = _latest_annual_value(df, _CONCEPT_EQUITY, ticker)
+    entry['equity_history'] = _get_annual_series(df, _CONCEPT_EQUITY, ticker)
     entry['shares_outstanding'] = (
         _latest_annual_value(df, _CONCEPT_SHARES_BASIC, ticker)
         or _latest_annual_value(df, _CONCEPT_SHARES_OUTSTANDING, ticker)
     )
-    # Derive net debt for the EV→Equity bridge (non-negative floor)
+    # Derive net debt for the EV→Equity bridge (non-negative floor).
+    # Includes both long-term and short-term debt obligations.
     lt_debt = entry['long_term_debt'] or 0.0
+    st_debt = entry['short_term_debt'] or 0.0
     cash = entry['cash'] or 0.0
-    entry['net_debt'] = max(0.0, lt_debt - cash)
+    entry['net_debt'] = max(0.0, lt_debt + st_debt - cash)
     logger.info(
         '[%s] Buffett data: net_income years=%s, da years=%s, capex years=%s, '
-        'revenue years=%s, equity=%s, shares=%s, cash=%s, net_debt=%s',
+        'revenue years=%s, equity=%s, shares=%s, cash=%s, st_debt=%s, net_debt=%s',
         ticker,
         list(entry['net_income_history'].keys()),
         list(entry['da_history'].keys()),
@@ -184,6 +203,7 @@ def _fetch_ticker(ticker: str) -> dict[str, Any]:
         entry['equity'],
         entry['shares_outstanding'],
         entry['cash'],
+        entry['short_term_debt'],
         entry['net_debt'],
     )
 
@@ -448,3 +468,18 @@ def _get_annual_series_with_fallback(
     if not result:
         result = _get_annual_series(df, fallback_concept, ticker, years_back)
     return result
+
+
+def _get_annual_series_with_fallbacks(
+    df, concepts: list[str], ticker: str = '', years_back: int = 10
+) -> dict[int, float]:
+    """Return annual series for the first concept in *concepts* that has data.
+
+    Tries each concept in order; returns the first non-empty result.
+    Returns an empty dict if none of the concepts has annual data.
+    """
+    for concept in concepts:
+        result = _get_annual_series(df, concept, ticker, years_back)
+        if result:
+            return result
+    return {}

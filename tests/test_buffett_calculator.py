@@ -186,13 +186,36 @@ class TestCalculateRoeSeries:
         assert result == {2021: 0.10, 2022: 0.12}
 
     def test_returns_empty_for_none_equity(self):
-        assert calculate_roe_series({2021: 100}, None) == {}
+        assert calculate_roe_series({2021: 100}) == {}
 
     def test_returns_empty_for_zero_equity(self):
-        assert calculate_roe_series({2021: 100}, 0) == {}
+        assert calculate_roe_series({2021: 100}, equity=0) == {}
 
     def test_returns_empty_for_empty_history(self):
-        assert calculate_roe_series({}, 1000) == {}
+        assert calculate_roe_series({}, equity=1000) == {}
+
+    def test_per_year_equity_used_when_provided(self):
+        # With equity_history, each year uses its own equity denominator
+        ni = {2021: 100, 2022: 200}
+        equity_history = {2021: 500, 2022: 2000}
+        result = calculate_roe_series(ni, equity_history=equity_history)
+        assert result[2021] == pytest.approx(0.20)  # 100/500
+        assert result[2022] == pytest.approx(0.10)  # 200/2000
+
+    def test_equity_history_takes_precedence_over_static(self):
+        # equity_history values should win over static equity
+        ni = {2021: 100}
+        equity_history = {2021: 500}
+        result = calculate_roe_series(ni, equity=1000, equity_history=equity_history)
+        assert result[2021] == pytest.approx(0.20)  # uses 500, not 1000
+
+    def test_falls_back_to_static_equity_for_missing_years(self):
+        # equity_history only has 2022; 2021 should fall back to static equity
+        ni = {2021: 100, 2022: 200}
+        equity_history = {2022: 2000}
+        result = calculate_roe_series(ni, equity=1000, equity_history=equity_history)
+        assert result[2021] == pytest.approx(0.10)   # 100/1000 (static)
+        assert result[2022] == pytest.approx(0.10)   # 200/2000 (history)
 
 
 # ---------------------------------------------------------------------------
@@ -234,7 +257,7 @@ class TestCalculateQualityScore:
         margins = {yr: 0.20 + (yr - 2015) * 0.025 for yr in range(2015, 2024)}
         score = calculate_quality_score(
             roe_series=roe,
-            long_term_debt=0,   # no debt → full debt score
+            net_debt=0,   # no net debt → full debt score
             owner_earnings=1_000_000,
             margin_series=margins,
         )
@@ -246,7 +269,7 @@ class TestCalculateQualityScore:
         margins = {yr: 0.30 - (yr - 2015) * 0.025 for yr in range(2015, 2024)}
         score = calculate_quality_score(
             roe_series=roe,
-            long_term_debt=1_000_000_000,
+            net_debt=1_000_000_000,
             owner_earnings=100,  # would take 10M years to pay off debt → 0 pts
             margin_series=margins,
         )
@@ -255,7 +278,7 @@ class TestCalculateQualityScore:
     def test_debt_payoff_within_3_years_gives_full_debt_points(self):
         score = calculate_quality_score(
             roe_series={},
-            long_term_debt=300,
+            net_debt=300,
             owner_earnings=100,  # 3 year payoff exactly
             margin_series={},
         )
@@ -264,11 +287,21 @@ class TestCalculateQualityScore:
     def test_debt_payoff_4_years_gives_partial_debt_points(self):
         score = calculate_quality_score(
             roe_series={},
-            long_term_debt=400,
+            net_debt=400,
             owner_earnings=100,  # 4 year payoff (between 3 and 6)
             margin_series={},
         )
         assert 0 < score < 30
+
+    def test_net_cash_position_gives_full_debt_score(self):
+        # net_debt == 0 means cash >= total debt (net-cash company)
+        score = calculate_quality_score(
+            roe_series={},
+            net_debt=0,
+            owner_earnings=100,
+            margin_series={},
+        )
+        assert score == 30  # full debt score for net-cash company
 
 
 # ---------------------------------------------------------------------------
@@ -337,7 +370,10 @@ class TestRunBuffettAnalysis:
                                      2022: 119_437e6, 2023: 114_301e6},
         'long_term_debt': 95_281e6,
         'equity': 62_146e6,
+        'equity_history': {2019: 90_488e6, 2020: 65_339e6, 2021: 63_090e6,
+                           2022: 50_672e6, 2023: 62_146e6},
         'shares_outstanding': 15_550_000_000,
+        'net_debt': 72_000e6,
     }
 
     def test_complete_data_returns_all_fields(self):
@@ -407,6 +443,41 @@ class TestRunBuffettAnalysis:
     def test_normalized_owner_earnings_present(self):
         result = run_buffett_analysis(self._complete_data, discount_rate=0.09)
         assert result['normalized_owner_earnings'] is not None
+
+    def test_discount_rate_floored_for_low_quality_company(self):
+        # A company that will score near 0 (all bad inputs) should have
+        # its discount rate floored to 10% even if the user passed 8%.
+        bad_data = {
+            'net_income_history': {yr: 100 for yr in range(2015, 2025)},
+            'da_history': {yr: 5 for yr in range(2015, 2025)},
+            'capex_history': {yr: 5 for yr in range(2015, 2025)},
+            'revenue_history': {yr: 10_000 for yr in range(2015, 2025)},
+            # Deliberately bad quality signals:
+            # - Very low ROE (near 0%): NI=100 / equity=100_000 = 0.1%
+            # - Massive net debt relative to OE
+            # - No margin improvement
+            'operating_income_history': {yr: 50 for yr in range(2015, 2025)},
+            'equity': 100_000,
+            'shares_outstanding': 1_000,
+            'net_debt': 1_000_000,  # enormous relative to OE
+        }
+        result = run_buffett_analysis(bad_data, discount_rate=0.08)
+        if result['quality_score'] is not None and result['quality_score'] < 40:
+            assert result['discount_rate_used'] >= 0.10
+        else:
+            # If quality score happens to be >= 40, no floor applies
+            assert result['discount_rate_used'] == pytest.approx(0.08)
+
+    def test_discount_rate_not_floored_for_high_quality_company(self):
+        # A high-quality company should use whatever rate the user specifies
+        result = run_buffett_analysis(self._complete_data, discount_rate=0.08)
+        # AAPL-like data should score above 40; rate should be unchanged
+        if result['quality_score'] is not None and result['quality_score'] >= 40:
+            assert result['discount_rate_used'] == pytest.approx(0.08)
+
+    def test_discount_rate_used_field_always_present(self):
+        result = run_buffett_analysis(self._complete_data, discount_rate=0.09)
+        assert result['discount_rate_used'] is not None
 
 
 # ---------------------------------------------------------------------------

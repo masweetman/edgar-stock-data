@@ -300,18 +300,32 @@ def calculate_iv_sensitivity(
 
 def calculate_roe_series(
     net_income_history: dict[int, float],
-    equity: float | None,
+    equity: float | None = None,
+    equity_history: dict[int, float] | None = None,
 ) -> dict[int, float]:
-    """Return {year: ROE} using a constant equity denominator (most recent equity).
+    """Return {year: ROE} using per-year equity when available.
 
-    A simplification — historical equity per year is not available from EDGAR
-    entity facts without per-year balance-sheet reconstruction, so we use the
-    most recent equity as the denominator across all years.
-    Returns an empty dict if equity is None or ≤ 0.
+    Preference order for the equity denominator:
+      1. `equity_history[year]` — the year's own equity from annual XBRL facts.
+         This is the most accurate and avoids distortion from buybacks or equity
+         issuance that affects the static denominator.
+      2. `equity` (static) — the most-recent equity, used only when
+         `equity_history` is not supplied or does not contain the year in question.
+
+    Returns an empty dict if no equity source is usable (both None/zero) or
+    net_income_history is empty.
     """
-    if not net_income_history or not equity or equity <= 0:
+    if not net_income_history:
         return {}
-    return {yr: ni / equity for yr, ni in net_income_history.items()}
+
+    eh = equity_history or {}
+    result: dict[int, float] = {}
+    for yr, ni in net_income_history.items():
+        denom = eh.get(yr) or equity
+        if not denom or denom <= 0:
+            continue
+        result[yr] = ni / denom
+    return result
 
 
 def calculate_operating_margins(
@@ -331,22 +345,26 @@ def calculate_operating_margins(
 
 def calculate_quality_score(
     roe_series: dict[int, float],
-    long_term_debt: float | None,
+    net_debt: float | None,
     owner_earnings: float | None,
     margin_series: dict[int, float],
 ) -> int | None:
     """0–100 quality score based on three Buffett criteria.
 
     ROE sub-score  (0–40): fraction of years where ROE > 15%, scaled to 40 pts.
-    Debt sub-score (0–30): full 30 pts if OE pays off LT debt in < 3 years;
-                           partial credit for up to 6 years.
+    Debt sub-score (0–30): full 30 pts if net_debt is 0 (debt-free or net-cash);
+                           full 30 pts if OE pays off net debt in < 3 years;
+                           partial credit for up to 6 years; 0 pts beyond 6 years.
     Margin sub-score (0–30): full 30 pts if margins are stable or widening;
                               partial if flat; 0 if declining.
+
+    net_debt should be max(0, total_debt - cash): pass the EV-bridge net_debt
+    value so that net-cash companies receive full debt score automatically.
 
     Returns None if there is insufficient data to score any sub-category
     (all three would return 0 with no data, which is misleading).
     """
-    if not roe_series and long_term_debt is None and not margin_series:
+    if not roe_series and net_debt is None and not margin_series:
         return None
 
     # --- ROE sub-score ---
@@ -358,8 +376,9 @@ def calculate_quality_score(
         roe_score = 0
 
     # --- Debt sub-score ---
-    if long_term_debt is not None and owner_earnings and owner_earnings > 0:
-        payoff_years = long_term_debt / owner_earnings
+    # net_debt == 0 means either no debt or more cash than debt (net-cash position).
+    if net_debt is not None and owner_earnings and owner_earnings > 0:
+        payoff_years = net_debt / owner_earnings
         if payoff_years <= _DEBT_PAYOFF_YEARS:
             debt_score = _DEBT_MAX_POINTS
         elif payoff_years <= _DEBT_PAYOFF_YEARS * 2:
@@ -368,9 +387,6 @@ def calculate_quality_score(
             debt_score = int(round(_DEBT_MAX_POINTS * fraction))
         else:
             debt_score = 0
-    elif long_term_debt == 0 or long_term_debt is None and owner_earnings:
-        # No debt → full debt score
-        debt_score = _DEBT_MAX_POINTS if long_term_debt == 0 else 0
     else:
         debt_score = 0
 
@@ -519,6 +535,7 @@ def run_buffett_analysis(
         'oe_is_noisy': False,
         'quality_score': None,
         'growth_rate_used': None,
+        'discount_rate_used': None,
         'net_debt': None,
         'capital_intensity': None,
         'earnings_consistency_cv': None,
@@ -536,6 +553,7 @@ def run_buffett_analysis(
         op_income_history: dict[int, float] = ticker_data.get('operating_income_history') or {}
         long_term_debt: float | None = ticker_data.get('long_term_debt')
         equity: float | None = ticker_data.get('equity')
+        equity_history: dict[int, float] = ticker_data.get('equity_history') or {}
         shares: float | None = ticker_data.get('shares_outstanding')
         net_debt: float = ticker_data.get('net_debt') or 0.0
 
@@ -573,9 +591,39 @@ def run_buffett_analysis(
         # Use normalized OE for DCF; fall back to single-year if normalization unavailable
         oe_for_dcf = normalized_oe if normalized_oe is not None else single_year_oe
 
+        # Stage 3: Quality Score (computed before DCF so discount floor can be applied)
+        roe_series = calculate_roe_series(
+            net_income_history, equity=equity, equity_history=equity_history
+        )
+        margin_series = calculate_operating_margins(op_income_history, revenue_history)
+        quality_score = calculate_quality_score(
+            roe_series=roe_series,
+            net_debt=net_debt,
+            owner_earnings=oe_for_dcf if oe_for_dcf is not None else single_year_oe,
+            margin_series=margin_series,
+        )
+        result['quality_score'] = quality_score
+
+        # Discount rate floor: low-quality companies (score < 40) must use >= 10%
+        # to encode additional risk that the quality score alone does not capture
+        # in the DCF itself.
+        _DISCOUNT_FLOOR_LOW_QUALITY = 0.10
+        _QUALITY_FLOOR_THRESHOLD = 40
+        effective_discount_rate = discount_rate
+        if (quality_score is not None
+                and quality_score < _QUALITY_FLOOR_THRESHOLD
+                and discount_rate < _DISCOUNT_FLOOR_LOW_QUALITY):
+            effective_discount_rate = _DISCOUNT_FLOOR_LOW_QUALITY
+            logger.info(
+                'Discount rate floored from %.1f%% to %.1f%% — quality score %d < %d',
+                discount_rate * 100, effective_discount_rate * 100,
+                quality_score, _QUALITY_FLOOR_THRESHOLD,
+            )
+        result['discount_rate_used'] = effective_discount_rate
+
         if oe_for_dcf is None or shares is None or shares <= 0:
             result['error'] = 'Insufficient data for DCF (missing net income or shares).'
-            # Still attempt quality score and supplemental metrics
+            # Still attempt supplemental metrics below
         else:
             # Stage 2: Growth Rate + Intrinsic Value
             growth_rate = project_growth_rate(net_income_history)
@@ -584,7 +632,7 @@ def run_buffett_analysis(
             intrinsic_value = calculate_intrinsic_value(
                 owner_earnings=oe_for_dcf,
                 growth_rate=growth_rate,
-                discount_rate=discount_rate,
+                discount_rate=effective_discount_rate,
                 shares=shares,
                 net_debt=net_debt,
             )
@@ -595,21 +643,10 @@ def run_buffett_analysis(
                 result['sensitivity'] = calculate_iv_sensitivity(
                     owner_earnings=oe_for_dcf,
                     growth_rate=growth_rate,
-                    discount_rate=discount_rate,
+                    discount_rate=effective_discount_rate,
                     shares=shares,
                     net_debt=net_debt,
                 )
-
-        # Stage 3: Quality Score
-        roe_series = calculate_roe_series(net_income_history, equity)
-        margin_series = calculate_operating_margins(op_income_history, revenue_history)
-        quality_score = calculate_quality_score(
-            roe_series=roe_series,
-            long_term_debt=long_term_debt,
-            owner_earnings=oe_for_dcf if oe_for_dcf is not None else single_year_oe,
-            margin_series=margin_series,
-        )
-        result['quality_score'] = quality_score
 
         # Predictability Rating (composite)
         result['predictability_rating'] = calculate_predictability_rating(
@@ -620,11 +657,12 @@ def run_buffett_analysis(
 
         logger.info(
             'Buffett analysis complete: IV=%s norm_OE=%s QS=%s growth=%.1f%% '
-            'net_debt=%s capex_intensity=%s consistency=%s predictability=%s',
+            'discount=%.1f%% net_debt=%s capex_intensity=%s consistency=%s predictability=%s',
             result['intrinsic_value'],
             result['normalized_owner_earnings'],
             result['quality_score'],
             (result['growth_rate_used'] or 0) * 100,
+            (result['discount_rate_used'] or 0) * 100,
             result['net_debt'],
             result['capital_intensity'],
             result['earnings_consistency_label'],

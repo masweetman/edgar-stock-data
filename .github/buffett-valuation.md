@@ -2,8 +2,8 @@
 
 > **Status:** Authoritative design spec for `app/buffett_calculator.py`.
 > Incorporates lessons from `gemini-vs-claude.md` to correct methodological
-> flaws identified in the Gemini/Ford analysis. Known implementation gaps
-> are explicitly flagged.
+> flaws identified in the Gemini/Ford analysis, and improvements from
+> `deep-research-report.md`. Known implementation gaps are explicitly flagged.
 
 ---
 
@@ -92,13 +92,12 @@ The ratio itself is informative and should be surfaced in output.
 
 ### Single-Year vs. Normalized Owner Earnings
 
-**Current implementation:** Uses the most recent fiscal year's net income and
-D&A. This makes the output sensitive to a single bad year.
-
-**Known gap:** A 3-to-5-year average of owner earnings would be more
-conservative and more representative. Until normalized, callers should apply
-extra skepticism when the most recent year's net income is materially higher or
-lower than the prior 3-year average.
+**Current implementation:** Computes owner earnings for each of the most
+recent 3 fiscal years and takes the average (`normalize_owner_earnings()`).
+The single-year value is also computed and exposed for transparency. A
+`oe_is_noisy` flag is set when the latest single-year OE deviates >25% from
+the 3-year average, signalling that the normalized figure is doing meaningful
+work.
 
 ---
 
@@ -151,22 +150,19 @@ Net Debt     = Long-Term Debt - Cash & Equivalents
 IV per share = Equity Value / Shares Outstanding
 ```
 
-**Current implementation gap:** `calculate_intrinsic_value()` divides total PV
-directly by shares without subtracting net debt. This overstates intrinsic
-value for any leveraged company. For a debt-free company it is exact; for a
-company like Ford (automotive net debt ~$10B) it materially inflates the
-per-share result.
+**Current implementation:** `calculate_intrinsic_value()` accepts a `net_debt`
+parameter (long-term debt + short-term borrowings − cash) and subtracts it
+from enterprise value before dividing by shares:
 
-**The fix requires:**
-1. Fetching cash/cash equivalents from EDGAR
-   (`us-gaap:CashAndCashEquivalentsAtCarryingValue`)
-2. Passing `long_term_debt` and `cash` into `calculate_intrinsic_value()`
-3. Computing `equity_value = total_pv - max(0, long_term_debt - cash)`
+```python
+net_debt = max(0.0, (lt_debt + st_debt) - cash)
+equity_value = max(0.0, enterprise_value - net_debt)
+iv_per_share = equity_value / shares
+```
 
-Until this is implemented, the tool systematically overstates intrinsic value
-for leveraged companies. The quality score's debt sub-score partially
-compensates by penalizing high-debt firms, but it is not a substitute for the
-bridge.
+Cash and debt are fetched from EDGAR XBRL. Short-term borrowings
+(`us-gaap:ShortTermBorrowings`, fallback `us-gaap:DebtCurrent`) are included
+so that companies carrying significant current debt are not over-valued.
 
 ---
 
@@ -236,23 +232,17 @@ g = (NI_last / NI_first) ^ (1 / years) - 1
 | Cap | 15% | Very few businesses sustain > 15% long-term; projecting higher overstates value |
 | Default (< 2 years data) | 5% | Conservative median when history is insufficient |
 
-### Known Fragility: CAGR on Volatile Earners
+### Robustness: Median YoY Growth Rate
 
-CAGR breaks down when:
-- The starting net income is negative or near zero
-- The company had a one-off loss or gain in either endpoint year
-- Earnings are highly cyclical (automakers, airlines, commodities)
-
-Current code returns the 5% default when `first_val <= 0` or `last_val <= 0`.
-This is a safe fallback but loses all historical information.
-
-**Better approach (future improvement):** Use the median of year-over-year
-growth rates across all consecutive year pairs. This is more robust to outlier
-years and handles sign changes more gracefully.
+**Current implementation:** Uses the median of consecutive year-over-year
+growth rates (`project_growth_rate()`). Only positive-to-positive pairs are
+included; if fewer than one valid pair exists, the 5% conservative default
+applies. This handles sign changes and outlier years far better than CAGR.
 
 For companies in a loss-to-profit transition (EV startups, turnarounds), even
 0% is optimistic as a near-term assumption. A three-stage DCF -- stress period,
-growth period, terminal -- would handle this more accurately.
+growth period, terminal -- would handle this more accurately and remains a
+future improvement.
 
 ---
 
@@ -281,19 +271,20 @@ separate indicator of how much to trust the IV estimate.
 | 40-69 | Medium predictability -- apply additional MOS conservatism |
 | 0-39 | Low predictability -- IV estimate is unreliable; do not act on it alone |
 
-### ROE Sub-Score Limitation: Static Equity Denominator
+### ROE Sub-Score: Per-Year Equity
 
-Current implementation uses the most recent equity as the denominator across
-all historical years:
+**Current implementation:** `calculate_roe_series()` uses per-year equity
+when an `equity_history` dict is provided (fetched as an annual XBRL series).
+It falls back to the most-recent static equity only when historical equity
+facts are unavailable:
 
 ```
-ROE_year = net_income_year / equity_current   # simplification
+ROE_year = net_income_year / equity_history[year]   # preferred
+ROE_year = net_income_year / equity_current          # fallback
 ```
 
-Ideally, each year's ROE would use that year's equity. The simplification
-overstates ROE in earlier years (when equity was lower) and understates it in
-later years (when equity may have grown). For companies with significant
-buybacks or equity issuance, this can meaningfully distort the score.
+This correctly reflects that earlier years had different equity bases,
+reducing distortion for buyback-heavy or high-growth-equity companies.
 
 ---
 
@@ -375,16 +366,18 @@ the user that even the corrected 36% MOS should be treated with caution.
 
 ## Known Deficiencies and Roadmap
 
-| # | Issue | Impact | Priority |
-|:---|:---|:---|:---|
-| 1 | EV->Equity bridge missing -- net debt not subtracted from total PV | Overstates IV for any leveraged company | High |
-| 2 | Single-year owner earnings -- sensitive to one bad year | Overstates/understates depending on year | High |
-| 3 | No sensitivity table output -- user cannot see model fragility | Silent model risk | High |
-| 4 | CAGR growth rate breaks on volatile/negative earners | Loses historical signal; returns 5% default | Medium |
-| 5 | ROE uses static equity denominator | Minor score distortion for buyback-heavy companies | Medium |
-| 6 | No multi-stage DCF for transitional businesses | Misvalues EV transitions, turnarounds | Medium |
-| 7 | Discount rate not tiered by quality score | Under-penalizes risky companies | Low |
-| 8 | No third-party benchmark | No sanity check against analyst consensus | Low |
+| # | Issue | Impact | Priority | Status |
+|:---|:---|:---|:---|:---|
+| 1 | EV->Equity bridge missing -- net debt not subtracted from total PV | Overstates IV for any leveraged company | High | ✅ Done |
+| 2 | Single-year owner earnings -- sensitive to one bad year | Overstates/understates depending on year | High | ✅ Done (3-yr avg) |
+| 3 | No sensitivity table output -- user cannot see model fragility | Silent model risk | High | ✅ Done (±1%/±2%) |
+| 4 | CAGR growth rate breaks on volatile/negative earners | Loses historical signal; returns 5% default | Medium | ✅ Done (median YoY) |
+| 5 | ROE uses static equity denominator | Minor score distortion for buyback-heavy companies | Medium | ✅ Done (per-year equity) |
+| 6 | Short-term debt excluded from net debt calculation | Understates leverage for companies with current debt | Medium | ✅ Done |
+| 7 | Revenue XBRL tags incomplete -- misses older/alternative filers | Missing revenue history for some tickers | Medium | ✅ Done (4 fallback tags) |
+| 8 | Discount rate not floored by quality score | Under-penalizes risky/low-quality companies | Low | ✅ Done (≥10% if score<40) |
+| 9 | No multi-stage DCF for transitional businesses | Misvalues EV transitions, turnarounds | Medium | Open |
+| 10 | No third-party benchmark | No sanity check against analyst consensus | Low | Open |
 
 ---
 
@@ -392,15 +385,16 @@ the user that even the corrected 36% MOS should be treated with caution.
 
 ### EDGAR XBRL Concepts Used
 
-| Field | Primary Concept | Fallback |
+| Field | Primary Concept | Fallback(s) |
 |:---|:---|:---|
 | Net Income | `us-gaap:NetIncomeLoss` | -- |
 | D&A | `us-gaap:DepreciationDepletionAndAmortization` | `us-gaap:DepreciationAndAmortization` |
-| CapEx | `us-gaap:PaymentsToAcquirePropertyPlantAndEquipment` | -- |
-| Revenue | `us-gaap:Revenues` | `us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax` |
+| CapEx | `us-gaap:PaymentsToAcquirePropertyPlantAndEquipment` | `us-gaap:CapitalExpenditure` |
+| Revenue | `us-gaap:Revenues` | `RevenueFromContractWithCustomerExcludingAssessedTax`, `SalesRevenueNet`, `SalesRevenueGoodsNet` |
 | Operating Income | `us-gaap:OperatingIncomeLoss` | -- |
 | Long-Term Debt | `us-gaap:LongTermDebt` | `us-gaap:LongTermDebtNoncurrent` |
-| Equity | `us-gaap:StockholdersEquity` | -- |
+| Short-Term Debt | `us-gaap:ShortTermBorrowings` | `us-gaap:DebtCurrent` |
+| Equity (latest + history) | `us-gaap:StockholdersEquity` | -- |
 | Shares Outstanding | `us-gaap:CommonStockSharesOutstanding` | `us-gaap:WeightedAverageNumberOfSharesOutstandingBasic` |
 | Cash (needed for EV bridge) | `us-gaap:CashAndCashEquivalentsAtCarryingValue` | `us-gaap:Cash` |
 

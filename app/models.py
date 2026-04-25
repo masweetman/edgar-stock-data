@@ -96,6 +96,11 @@ class Company(db.Model):
     predictability_rating = db.Column(db.String(10), nullable=True)
     fetched_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
+    annual_eps_records = db.relationship(
+        'AnnualEPS', back_populates='company', cascade='all, delete-orphan',
+        order_by='AnnualEPS.year',
+    )
+
     def to_dict(self) -> dict:
         return {
             'id': self.id,
@@ -123,3 +128,22 @@ class Company(db.Model):
 
     def __repr__(self) -> str:
         return f'<Company {self.ticker}>'
+
+
+class AnnualEPS(db.Model):
+    __tablename__ = 'annual_eps'
+    __table_args__ = (
+        db.UniqueConstraint('company_id', 'year', name='uq_annual_eps_company_year'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False, index=True)
+    year = db.Column(db.Integer, nullable=False)
+    value = db.Column(db.Float, nullable=False)
+    avg_3yr = db.Column(db.Float, nullable=True)
+    avg_6yr = db.Column(db.Float, nullable=True)
+
+    company = db.relationship('Company', back_populates='annual_eps_records')
+
+    def __repr__(self) -> str:
+        return f'<AnnualEPS company_id={self.company_id} year={self.year} value={self.value}>'
