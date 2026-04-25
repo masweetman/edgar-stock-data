@@ -30,6 +30,36 @@ class TestApiFetch:
         entries = Company.query.filter_by(user_id=user.id).all()
         assert len(entries) == 2
 
+    def test_fetch_populates_buffett_fields(self, client, db, user, logged_in_client, mock_fetch_data):
+        res = logged_in_client.post('/api/fetch')
+        assert res.status_code == 200
+        entry_dicts = res.json['data']
+        for e in entry_dicts:
+            # intrinsic_value and owner_earnings should be computed from the rich mock data
+            assert e['intrinsic_value'] is not None, f"{e['ticker']} intrinsic_value missing"
+            assert e['owner_earnings'] is not None, f"{e['ticker']} owner_earnings missing"
+            assert e['quality_score'] is not None, f"{e['ticker']} quality_score missing"
+
+    def test_fetch_with_minimal_edgar_data_does_not_crash(self, client, db, user, logged_in_client):
+        """When EDGAR returns no Buffett fields, the row is still saved with nulls."""
+        minimal = {
+            'AAPL': {
+                'cik': '0000320193', 'eps_avg': 6.11, 'bvps': 3.85,
+                'div': 0.96, 'div_date': '2023-12-31', 'error': None,
+                'net_income_history': {}, 'da_history': {}, 'capex_history': {},
+                'revenue_history': {}, 'operating_income_history': {},
+                'long_term_debt': None, 'equity': None, 'shares_outstanding': None,
+            },
+        }
+        from unittest.mock import patch
+        with patch('app.views.fetch_data', return_value=minimal):
+            res = logged_in_client.post('/api/fetch')
+        assert res.status_code == 200
+        assert res.json['success'] is True
+        entry = Company.query.filter_by(user_id=user.id, ticker='AAPL').first()
+        assert entry is not None
+        assert entry.intrinsic_value is None  # gracefully None, no crash
+
     def test_fetch_no_config(self, client, db):
         # Register a user without config
         token = _csrf(client, '/register')

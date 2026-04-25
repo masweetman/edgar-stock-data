@@ -1,7 +1,5 @@
-# edgar-stock-data
-config.py
-*.csv
-*.xlsx
+# docs
+docs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

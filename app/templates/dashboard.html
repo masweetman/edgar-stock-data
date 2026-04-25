@@ -46,25 +46,53 @@
       <tr>
         <th>Ticker</th>
         <th>Live Price</th>
-        <th>CIK</th>
         <th>Avg EPS</th>
         <th>BVPS</th>
         <th>Dividend</th>
-        <th>Div Date</th>
-        <th>Fetched At</th>
+        <th title="Price ÷ Average EPS">P/E</th>
+        <th title="Price ÷ Book Value Per Share">P/BVPS</th>
+        <th title="0–100 Buffett quality score">Quality</th>
+        <th title="Margin of Safety vs Intrinsic Value">MOS</th>
       </tr>
     </thead>
     <tbody id="data-tbody">
       {% for e in entries %}
+      {% set price = prices[e.ticker] %}
+      {% set pe = (price / e.eps_avg) if (price is not none and e.eps_avg and e.eps_avg > 0) else none %}
+      {% set pbvps = (price / e.bvps) if (price is not none and e.bvps and e.bvps > 0) else none %}
+      {% set mos = (1 - price / e.intrinsic_value) if (price is not none and e.intrinsic_value and e.intrinsic_value > 0) else none %}
       <tr data-ticker="{{ e.ticker }}">
         <td><strong><a href="{{ url_for('main.company', ticker=e.ticker) }}">{{ e.ticker }}</a></strong></td>
-        <td>{{ '$%.2f' | format(prices[e.ticker]) if prices[e.ticker] is not none else '—' }}</td>
-        <td>{{ e.cik or '—' }}</td>
+        <td>{{ '$%.2f' | format(price) if price is not none else '—' }}</td>
         <td>{{ '%.2f' | format(e.eps_avg) if e.eps_avg is not none else '—' }}</td>
         <td>{{ '%.2f' | format(e.bvps) if e.bvps is not none else '—' }}</td>
         <td>{{ '%.4f' | format(e.div) if e.div is not none else '—' }}</td>
-        <td>{{ e.div_date or '—' }}</td>
-        <td class="text-muted small">{{ e.fetched_at.strftime('%Y-%m-%d %H:%M') if e.fetched_at else '—' }}</td>
+        <td>{{ '%.1f' | format(pe) if pe is not none else '—' }}</td>
+        <td>{{ '%.2f' | format(pbvps) if pbvps is not none else '—' }}</td>
+        <td>
+          {% if e.quality_score is not none %}
+            {% if e.quality_score >= 70 %}
+              <span class="badge bg-success">{{ e.quality_score }}</span>
+            {% elif e.quality_score >= 40 %}
+              <span class="badge bg-warning text-dark">{{ e.quality_score }}</span>
+            {% else %}
+              <span class="badge bg-danger">{{ e.quality_score }}</span>
+            {% endif %}
+          {% else %}—{% endif %}
+        </td>
+        <td>
+          {% if mos is not none %}
+            {% if mos >= 0.35 %}
+              <span class="badge bg-success">{{ '%.0f' | format(mos * 100) }}% Strong Buy</span>
+            {% elif mos >= 0.20 %}
+              <span class="badge bg-primary">{{ '%.0f' | format(mos * 100) }}% Buy</span>
+            {% elif mos >= 0 %}
+              <span class="badge bg-warning text-dark">{{ '%.0f' | format(mos * 100) }}% Hold</span>
+            {% else %}
+              <span class="badge bg-danger">{{ '%.0f' | format(mos * 100) }}% Overvalued</span>
+            {% endif %}
+          {% else %}—{% endif %}
+        </td>
       </tr>
       {% endfor %}
     </tbody>

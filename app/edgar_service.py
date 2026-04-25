@@ -27,6 +27,18 @@ _CONCEPT_SHARES_OUTSTANDING = 'us-gaap:CommonStockSharesOutstanding'
 _CONCEPT_DIV_DECLARED = 'us-gaap:CommonStockDividendsPerShareDeclared'
 _CONCEPT_DIV_PAID = 'us-gaap:CommonStockDividendsPerShareCashPaid'
 
+# Buffett-analysis XBRL concepts
+_CONCEPT_NET_INCOME = 'us-gaap:NetIncomeLoss'
+_CONCEPT_DA = 'us-gaap:DepreciationDepletionAndAmortization'
+_CONCEPT_DA_ALT = 'us-gaap:DepreciationAndAmortization'
+_CONCEPT_CAPEX = 'us-gaap:PaymentsToAcquirePropertyPlantAndEquipment'
+_CONCEPT_REVENUE = 'us-gaap:Revenues'
+_CONCEPT_REVENUE_ALT = 'us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax'
+_CONCEPT_OP_INCOME = 'us-gaap:OperatingIncomeLoss'
+_CONCEPT_LT_DEBT = 'us-gaap:LongTermDebt'
+_CONCEPT_LT_DEBT_ALT = 'us-gaap:LongTermDebtNoncurrent'
+_CONCEPT_EQUITY = 'us-gaap:StockholdersEquity'
+
 
 def fetch_data(sec_email: str, tickers: list[str], years: list[str], verify_ssl: bool = True) -> dict[str, dict[str, Any]]:
     """Fetch EPS, BVPS, and dividend data for a list of tickers from SEC EDGAR.
@@ -75,6 +87,15 @@ def _fetch_ticker(ticker: str, years: list[str]) -> dict[str, Any]:
         'div': None,
         'div_date': None,
         'error': None,
+        # Buffett-analysis fields
+        'net_income_history': {},
+        'da_history': {},
+        'capex_history': {},
+        'revenue_history': {},
+        'operating_income_history': {},
+        'long_term_debt': None,
+        'equity': None,
+        'shares_outstanding': None,
     }
 
     logger.info('[%s] Looking up company via edgartools...', ticker)
@@ -122,6 +143,33 @@ def _fetch_ticker(ticker: str, years: list[str]) -> dict[str, Any]:
     entry['div'] = div
     entry['div_date'] = div_date
     logger.info('[%s] Dividend: %s on %s', ticker, div, div_date)
+
+    # --- Buffett-analysis data (10-year history series) ---
+    entry['net_income_history'] = _get_annual_series(df, _CONCEPT_NET_INCOME, ticker)
+    entry['da_history'] = _get_annual_series_with_fallback(
+        df, _CONCEPT_DA, _CONCEPT_DA_ALT, ticker)
+    entry['capex_history'] = _get_annual_series(df, _CONCEPT_CAPEX, ticker)
+    entry['revenue_history'] = _get_annual_series_with_fallback(
+        df, _CONCEPT_REVENUE, _CONCEPT_REVENUE_ALT, ticker)
+    entry['operating_income_history'] = _get_annual_series(df, _CONCEPT_OP_INCOME, ticker)
+    entry['long_term_debt'] = _latest_annual_value_with_fallback(
+        df, _CONCEPT_LT_DEBT, _CONCEPT_LT_DEBT_ALT, ticker)
+    entry['equity'] = _latest_annual_value(df, _CONCEPT_EQUITY, ticker)
+    entry['shares_outstanding'] = (
+        _latest_annual_value(df, _CONCEPT_SHARES_BASIC, ticker)
+        or _latest_annual_value(df, _CONCEPT_SHARES_OUTSTANDING, ticker)
+    )
+    logger.info(
+        '[%s] Buffett data: net_income years=%s, da years=%s, capex years=%s, '
+        'revenue years=%s, equity=%s, shares=%s',
+        ticker,
+        list(entry['net_income_history'].keys()),
+        list(entry['da_history'].keys()),
+        list(entry['capex_history'].keys()),
+        list(entry['revenue_history'].keys()),
+        entry['equity'],
+        entry['shares_outstanding'],
+    )
 
     return entry
 
@@ -247,3 +295,60 @@ def _latest_annual_value(df, concept: str, ticker: str = '') -> float | None:
     val = float(sub.sort_values('period_end').iloc[-1]['numeric_value'])
     logger.debug('[%s] %s = %s', ticker, concept, val)
     return val
+
+
+def _latest_annual_value_with_fallback(
+    df, concept: str, fallback_concept: str, ticker: str = ''
+) -> float | None:
+    """Return the most recent annual value, trying fallback concept if primary is empty."""
+    val = _latest_annual_value(df, concept, ticker)
+    if val is None:
+        val = _latest_annual_value(df, fallback_concept, ticker)
+    return val
+
+
+def _get_annual_series(df, concept: str, ticker: str = '', years_back: int = 10) -> dict[int, float]:
+    """Return a {fiscal_year: value} dict for up to `years_back` most recent annual FY facts.
+
+    Uses the latest period_end per fiscal_year to deduplicate restated filings.
+    Returns an empty dict if the concept is not present.
+    """
+    try:
+        sub = df[
+            (df['concept'] == concept) &
+            (df['fiscal_period'] == 'FY')
+        ].dropna(subset=['numeric_value']).copy()
+
+        if sub.empty:
+            logger.debug('[%s] _get_annual_series: no FY data for %s', ticker, concept)
+            return {}
+
+        # Deduplicate: keep row with the latest period_end per fiscal_year
+        deduped = (
+            sub.sort_values('period_end')
+            .groupby('fiscal_year', as_index=False)
+            .last()
+        )
+
+        # Keep only the most recent N years
+        deduped = deduped.sort_values('fiscal_year').tail(years_back)
+
+        result = {
+            int(row['fiscal_year']): float(row['numeric_value'])
+            for _, row in deduped.iterrows()
+        }
+        logger.debug('[%s] _get_annual_series %s: %s', ticker, concept, result)
+        return result
+    except Exception as exc:
+        logger.warning('[%s] _get_annual_series failed for %s: %s', ticker, concept, exc)
+        return {}
+
+
+def _get_annual_series_with_fallback(
+    df, concept: str, fallback_concept: str, ticker: str = '', years_back: int = 10
+) -> dict[int, float]:
+    """Return annual series for concept, falling back to fallback_concept if empty."""
+    result = _get_annual_series(df, concept, ticker, years_back)
+    if not result:
+        result = _get_annual_series(df, fallback_concept, ticker, years_back)
+    return result

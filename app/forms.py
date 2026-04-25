@@ -1,6 +1,6 @@
 from flask_wtf import FlaskForm
-from wtforms import BooleanField, EmailField, PasswordField, StringField, TextAreaField
-from wtforms.validators import DataRequired, Email, EqualTo, Length, Optional, Regexp
+from wtforms import BooleanField, DecimalField, EmailField, PasswordField, StringField, TextAreaField
+from wtforms.validators import DataRequired, Email, EqualTo, Length, NumberRange, Optional, Regexp
 
 
 class LoginForm(FlaskForm):
@@ -56,6 +56,16 @@ class ConfigForm(FlaskForm):
         'Years',
         validators=[DataRequired()],
         description='One year per line (e.g. 2022).',
+    )
+    discount_rate = DecimalField(
+        'Discount Rate',
+        validators=[
+            DataRequired(),
+            NumberRange(min=0.01, max=0.30, message='Discount rate must be between 1% and 30%.'),
+        ],
+        places=4,
+        default=0.09,
+        description='Annual discount rate used for the intrinsic value DCF model (e.g. 0.09 for 9%).',
     )
 
 

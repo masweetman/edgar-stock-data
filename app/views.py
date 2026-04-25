@@ -22,6 +22,7 @@ from flask import (
 from flask_login import current_user, login_required, login_user, logout_user
 
 from app import db, limiter
+from app.buffett_calculator import run_buffett_analysis
 from app.edgar_service import fetch_data
 from app.forms import (
     ConfigForm,
@@ -224,11 +225,13 @@ def config():
         form.sec_email.data = cfg.sec_email
         form.tickers.data = '\n'.join(cfg.tickers)
         form.years.data = '\n'.join(cfg.years)
+        form.discount_rate.data = cfg.discount_rate
 
     if form.validate_on_submit():
         cfg.sec_email = form.sec_email.data
         cfg.tickers = _tickers_from_text(form.tickers.data)
         cfg.years = _years_from_text(form.years.data)
+        cfg.discount_rate = float(form.discount_rate.data)
         db.session.commit()
         return redirect(url_for('main.dashboard'))
 
@@ -263,6 +266,8 @@ def dashboard():
 @main.route('/company/<ticker>')
 @login_required
 def company(ticker: str):
+    from app.buffett_calculator import calculate_margin_of_safety, mos_signal as _mos_signal
+
     entries = (
         Company.query
         .filter_by(user_id=current_user.id, ticker=ticker.upper())
@@ -275,7 +280,21 @@ def company(ticker: str):
 
     price: float | None = _yf_price(ticker)
 
-    return render_template('company.html', ticker=ticker.upper(), entries=entries, price=price)
+    # Compute MOS dynamically from live price and stored intrinsic value
+    latest = entries[0]
+    mos: float | None = calculate_margin_of_safety(price, latest.intrinsic_value)
+    signal: str = _mos_signal(mos)
+    discount_rate = current_user.config.discount_rate if current_user.config else 0.09
+
+    return render_template(
+        'company.html',
+        ticker=ticker.upper(),
+        entries=entries,
+        price=price,
+        mos=mos,
+        mos_signal=signal,
+        discount_rate=discount_rate,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -324,9 +343,12 @@ def api_fetch():
             lg.removeHandler(log_handler)
             lg.setLevel(original_levels[lg])
 
+    discount_rate = float(cfg.discount_rate) if cfg.discount_rate else 0.09
+
     now = datetime.now(timezone.utc)
     saved = []
     for ticker, data in results.items():
+        buffett = run_buffett_analysis(data, discount_rate)
         entry = Company(
             user_id=current_user.id,
             ticker=ticker,
@@ -335,6 +357,10 @@ def api_fetch():
             bvps=data.get('bvps'),
             div=data.get('div'),
             div_date=data.get('div_date'),
+            owner_earnings=buffett.get('owner_earnings'),
+            intrinsic_value=buffett.get('intrinsic_value'),
+            quality_score=buffett.get('quality_score'),
+            growth_rate_used=buffett.get('growth_rate_used'),
             fetched_at=now,
         )
         db.session.add(entry)

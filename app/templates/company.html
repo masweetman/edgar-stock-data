@@ -14,6 +14,103 @@
   <p class="text-muted small mt-1">Live price refreshes on page load.</p>
 </div>
 
+{# ── Buffett Analysis card ── #}
+{% set latest = entries[0] %}
+<div class="card mb-4 border-primary">
+  <div class="card-header bg-primary text-white fw-semibold">
+    Buffett-Style Valuation Analysis
+    <span class="float-end small fw-normal opacity-75">Discount rate: {{ '%.1f' | format(discount_rate * 100) }}%</span>
+  </div>
+  <div class="card-body">
+    <div class="row g-3">
+
+      <div class="col-sm-6 col-md-3">
+        <div class="text-muted small">Intrinsic Value (per share)</div>
+        <div class="fs-5 fw-bold">
+          {% if latest.intrinsic_value is not none %}
+            ${{ '%.2f' | format(latest.intrinsic_value) }}
+          {% else %}
+            <span class="text-secondary">—</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="col-sm-6 col-md-3">
+        <div class="text-muted small">Owner Earnings (total)</div>
+        <div class="fs-5 fw-bold">
+          {% if latest.owner_earnings is not none %}
+            ${{ '{:,.0f}'.format(latest.owner_earnings) }}
+          {% else %}
+            <span class="text-secondary">—</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="col-sm-6 col-md-3">
+        <div class="text-muted small">Quality Score</div>
+        <div class="fs-5 fw-bold">
+          {% if latest.quality_score is not none %}
+            {% if latest.quality_score >= 70 %}
+              <span class="badge bg-success fs-6">{{ latest.quality_score }}/100</span>
+            {% elif latest.quality_score >= 40 %}
+              <span class="badge bg-warning text-dark fs-6">{{ latest.quality_score }}/100</span>
+            {% else %}
+              <span class="badge bg-danger fs-6">{{ latest.quality_score }}/100</span>
+            {% endif %}
+          {% else %}
+            <span class="text-secondary">—</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="col-sm-6 col-md-3">
+        <div class="text-muted small">Growth Rate Used</div>
+        <div class="fs-5 fw-bold">
+          {% if latest.growth_rate_used is not none %}
+            {{ '%.1f' | format(latest.growth_rate_used * 100) }}%
+          {% else %}
+            <span class="text-secondary">—</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="col-12 border-top pt-3">
+        <div class="d-flex align-items-center gap-3 flex-wrap">
+          <div>
+            <span class="text-muted small me-1">Margin of Safety:</span>
+            {% if mos is not none %}
+              <strong>{{ '%.1f' | format(mos * 100) }}%</strong>
+            {% else %}
+              <strong class="text-secondary">—</strong>
+            {% endif %}
+          </div>
+          <div>
+            {% if mos_signal == 'Strong Buy' %}
+              <span class="badge bg-success fs-6">{{ mos_signal }}</span>
+            {% elif mos_signal == 'Buy' %}
+              <span class="badge bg-primary fs-6">{{ mos_signal }}</span>
+            {% elif mos_signal == 'Hold' %}
+              <span class="badge bg-warning text-dark fs-6">{{ mos_signal }}</span>
+            {% elif mos_signal == 'Overvalued' %}
+              <span class="badge bg-danger fs-6">{{ mos_signal }}</span>
+            {% else %}
+              <span class="badge bg-secondary fs-6">{{ mos_signal }}</span>
+            {% endif %}
+          </div>
+          {% if price is not none and latest.intrinsic_value is not none %}
+            <div class="text-muted small">
+              Market ${{ '%.2f' | format(price) }} vs IV ${{ '%.2f' | format(latest.intrinsic_value) }}
+            </div>
+          {% endif %}
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+{# ── Historical fetch table ── #}
+<h5 class="mb-2">Fetch History</h5>
 <div class="table-responsive">
   <table class="table table-sm table-hover">
     <thead class="table-dark">
@@ -24,6 +121,9 @@
         <th>BVPS</th>
         <th>Dividend</th>
         <th>Div Date</th>
+        <th>Owner Earnings</th>
+        <th>Intrinsic Value</th>
+        <th>Quality</th>
       </tr>
     </thead>
     <tbody>
@@ -35,6 +135,9 @@
         <td>{{ '%.2f' | format(e.bvps) if e.bvps is not none else '—' }}</td>
         <td>{{ '%.4f' | format(e.div) if e.div is not none else '—' }}</td>
         <td>{{ e.div_date or '—' }}</td>
+        <td>{{ '$%s' | format('{:,.0f}'.format(e.owner_earnings)) if e.owner_earnings is not none else '—' }}</td>
+        <td>{{ '$%.2f' | format(e.intrinsic_value) if e.intrinsic_value is not none else '—' }}</td>
+        <td>{{ e.quality_score if e.quality_score is not none else '—' }}</td>
       </tr>
       {% endfor %}
     </tbody>

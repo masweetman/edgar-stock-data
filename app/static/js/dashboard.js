@@ -51,12 +51,13 @@
           row.innerHTML = [
             '<td><strong><a href="' + companyUrl + '">' + e.ticker + '</a></strong></td>',
             '<td>\u2014</td>',
-            '<td>' + (e.cik || '\u2014') + '</td>',
             '<td>' + (e.eps_avg != null ? e.eps_avg.toFixed(2) : '\u2014') + '</td>',
             '<td>' + (e.bvps != null ? e.bvps.toFixed(2) : '\u2014') + '</td>',
             '<td>' + (e.div != null ? e.div.toFixed(4) : '\u2014') + '</td>',
-            '<td>' + (e.div_date || '\u2014') + '</td>',
-            '<td class="text-muted small">' + (e.fetched_at ? e.fetched_at.substring(0, 16).replace('T', ' ') : '\u2014') + '</td>',
+            '<td>\u2014</td>',
+            '<td>\u2014</td>',
+            '<td>' + (e.quality_score != null ? e.quality_score : '\u2014') + '</td>',
+            '<td>\u2014</td>',
           ].join('');
           tbody.appendChild(row);
         });

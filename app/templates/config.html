@@ -37,6 +37,16 @@
         {% endfor %}
       </div>
 
+      <div class="mb-3">
+        {{ form.discount_rate.label(class="form-label") }}
+        {{ form.discount_rate(class="form-control" + (" is-invalid" if form.discount_rate.errors else ""),
+                              step="0.001", min="0.01", max="0.30") }}
+        <div class="form-text">{{ form.discount_rate.description }}</div>
+        {% for err in form.discount_rate.errors %}
+          <div class="invalid-feedback">{{ err }}</div>
+        {% endfor %}
+      </div>
+
       <button type="submit" class="btn btn-primary">Save & Go to Dashboard</button>
       <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-secondary ms-2">Cancel</a>
     </form>

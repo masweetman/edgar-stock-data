@@ -55,6 +55,7 @@ class UserConfig(db.Model):
     sec_email = db.Column(db.String(120), nullable=False, default='')
     _tickers = db.Column('tickers', db.Text, nullable=False, default='[]')
     _years = db.Column('years', db.Text, nullable=False, default='[]')
+    discount_rate = db.Column(db.Float, nullable=False, default=0.09)
     updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc),
                            onupdate=lambda: datetime.now(timezone.utc))
 
@@ -91,6 +92,10 @@ class Company(db.Model):
     bvps = db.Column(db.Float, nullable=True)
     div = db.Column(db.Float, nullable=True)
     div_date = db.Column(db.String(20), nullable=True)
+    owner_earnings = db.Column(db.Float, nullable=True)
+    intrinsic_value = db.Column(db.Float, nullable=True)
+    quality_score = db.Column(db.Integer, nullable=True)
+    growth_rate_used = db.Column(db.Float, nullable=True)
     fetched_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     user = db.relationship('User', back_populates='stock_data')
@@ -104,6 +109,10 @@ class Company(db.Model):
             'bvps': self.bvps,
             'div': self.div,
             'div_date': self.div_date,
+            'owner_earnings': self.owner_earnings,
+            'intrinsic_value': self.intrinsic_value,
+            'quality_score': self.quality_score,
+            'growth_rate_used': self.growth_rate_used,
             'fetched_at': self.fetched_at.isoformat() if self.fetched_at else None,
         }
 
