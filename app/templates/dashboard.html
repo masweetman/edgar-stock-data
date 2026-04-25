@@ -53,6 +53,8 @@
         <th class="sortable" data-col="7" title="Price ÷ Book Value Per Share" style="cursor:pointer;user-select:none">P/BVPS <span class="sort-arrow"></span></th>
         <th class="sortable" data-col="8" title="0–100 Buffett quality score" style="cursor:pointer;user-select:none">Quality <span class="sort-arrow"></span></th>
         <th class="sortable" data-col="9" title="Margin of Safety vs Intrinsic Value" style="cursor:pointer;user-select:none">MOS <span class="sort-arrow"></span></th>
+        <th title="Composite predictability rating">Predictability</th>
+        <th title="IV range at base ±2% discount rate">IV Range</th>
       </tr>
     </thead>
     <tbody id="data-tbody">
@@ -94,6 +96,26 @@
               <span class="badge bg-danger">{{ '%.0f' | format(mos * 100) }}% Overvalued</span>
             {% endif %}
           {% else %}—{% endif %}
+        </td>
+        <td>
+          {% if e.predictability_rating == 'High' %}
+            <span class="badge bg-success">High</span>
+          {% elif e.predictability_rating == 'Medium' %}
+            <span class="badge bg-warning text-dark">Medium</span>
+          {% elif e.predictability_rating == 'Low' %}
+            <span class="badge bg-danger">Low</span>
+          {% else %}
+            <span class="text-muted">—</span>
+          {% endif %}
+        </td>
+        <td class="text-muted small">
+          {% if e.iv_sensitivity_low is not none and e.iv_sensitivity_high is not none %}
+            ${{ '%.2f' | format(e.iv_sensitivity_low) }}–${{ '%.2f' | format(e.iv_sensitivity_high) }}
+          {% elif e.intrinsic_value is not none %}
+            ${{ '%.2f' | format(e.intrinsic_value) }}
+          {% else %}
+            —
+          {% endif %}
         </td>
       </tr>
       {% endfor %}

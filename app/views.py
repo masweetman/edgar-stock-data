@@ -356,9 +356,19 @@ def api_fetch():
         entry.div = data.get('div')
         entry.div_date = data.get('div_date')
         entry.owner_earnings = buffett.get('owner_earnings')
+        entry.normalized_owner_earnings = buffett.get('normalized_owner_earnings')
+        entry.oe_is_noisy = buffett.get('oe_is_noisy')
         entry.intrinsic_value = buffett.get('intrinsic_value')
         entry.quality_score = buffett.get('quality_score')
         entry.growth_rate_used = buffett.get('growth_rate_used')
+        entry.net_debt = buffett.get('net_debt')
+        sensitivity = buffett.get('sensitivity') or {}
+        entry.iv_sensitivity_low = sensitivity.get('r_plus_2')   # most conservative
+        entry.iv_sensitivity_high = sensitivity.get('r_minus_2')  # most optimistic
+        entry.capital_intensity = buffett.get('capital_intensity')
+        entry.earnings_consistency_cv = buffett.get('earnings_consistency_cv')
+        entry.earnings_consistency_label = buffett.get('earnings_consistency_label')
+        entry.predictability_rating = buffett.get('predictability_rating')
         entry.fetched_at = now
         saved.append(entry)
 

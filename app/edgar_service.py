@@ -39,6 +39,10 @@ _CONCEPT_OP_INCOME = 'us-gaap:OperatingIncomeLoss'
 _CONCEPT_LT_DEBT = 'us-gaap:LongTermDebt'
 _CONCEPT_LT_DEBT_ALT = 'us-gaap:LongTermDebtNoncurrent'
 _CONCEPT_EQUITY = 'us-gaap:StockholdersEquity'
+# Additional concepts for EV-→Equity bridge and cross-checks
+_CONCEPT_CASH = 'us-gaap:CashAndCashEquivalentsAtCarryingValue'
+_CONCEPT_CASH_ALT = 'us-gaap:Cash'
+_CONCEPT_OP_CASHFLOW = 'us-gaap:NetCashProvidedByUsedInOperatingActivities'
 
 
 def fetch_data(sec_email: str, tickers: list[str], verify_ssl: bool = True) -> dict[str, dict[str, Any]]:
@@ -93,7 +97,10 @@ def _fetch_ticker(ticker: str) -> dict[str, Any]:
         'capex_history': {},
         'revenue_history': {},
         'operating_income_history': {},
+        'op_cashflow_history': {},
         'long_term_debt': None,
+        'cash': None,
+        'net_debt': None,
         'equity': None,
         'shares_outstanding': None,
     }
@@ -154,14 +161,21 @@ def _fetch_ticker(ticker: str) -> dict[str, Any]:
     entry['operating_income_history'] = _get_annual_series(df, _CONCEPT_OP_INCOME, ticker)
     entry['long_term_debt'] = _latest_annual_value_with_fallback(
         df, _CONCEPT_LT_DEBT, _CONCEPT_LT_DEBT_ALT, ticker)
+    entry['cash'] = _latest_annual_value_with_fallback(
+        df, _CONCEPT_CASH, _CONCEPT_CASH_ALT, ticker)
+    entry['op_cashflow_history'] = _get_annual_series(df, _CONCEPT_OP_CASHFLOW, ticker)
     entry['equity'] = _latest_annual_value(df, _CONCEPT_EQUITY, ticker)
     entry['shares_outstanding'] = (
         _latest_annual_value(df, _CONCEPT_SHARES_BASIC, ticker)
         or _latest_annual_value(df, _CONCEPT_SHARES_OUTSTANDING, ticker)
     )
+    # Derive net debt for the EV→Equity bridge (non-negative floor)
+    lt_debt = entry['long_term_debt'] or 0.0
+    cash = entry['cash'] or 0.0
+    entry['net_debt'] = max(0.0, lt_debt - cash)
     logger.info(
         '[%s] Buffett data: net_income years=%s, da years=%s, capex years=%s, '
-        'revenue years=%s, equity=%s, shares=%s',
+        'revenue years=%s, equity=%s, shares=%s, cash=%s, net_debt=%s',
         ticker,
         list(entry['net_income_history'].keys()),
         list(entry['da_history'].keys()),
@@ -169,6 +183,8 @@ def _fetch_ticker(ticker: str) -> dict[str, Any]:
         list(entry['revenue_history'].keys()),
         entry['equity'],
         entry['shares_outstanding'],
+        entry['cash'],
+        entry['net_debt'],
     )
 
     return entry

@@ -109,6 +109,163 @@
   </div>
 </div>
 
+{# ── Predictability + Supplemental Metrics card ── #}
+<div class="card mb-4">
+  <div class="card-header fw-semibold">Valuation Confidence Indicators</div>
+  <div class="card-body">
+    <div class="row g-3">
+
+      <div class="col-sm-6 col-md-3">
+        <div class="text-muted small">Predictability Rating</div>
+        <div class="fs-5 fw-bold mt-1">
+          {% if latest.predictability_rating == 'High' %}
+            <span class="badge bg-success fs-6">High</span>
+          {% elif latest.predictability_rating == 'Medium' %}
+            <span class="badge bg-warning text-dark fs-6">Medium</span>
+          {% elif latest.predictability_rating == 'Low' %}
+            <span class="badge bg-danger fs-6">Low</span>
+          {% else %}
+            <span class="text-secondary">—</span>
+          {% endif %}
+        </div>
+        <div class="text-muted" style="font-size:.72rem;">How much to trust the IV estimate</div>
+      </div>
+
+      <div class="col-sm-6 col-md-3">
+        <div class="text-muted small">Earnings Consistency</div>
+        <div class="fs-5 fw-bold mt-1">
+          {% if latest.earnings_consistency_label %}
+            {% if latest.earnings_consistency_label == 'High' %}
+              <span class="badge bg-success">High</span>
+            {% elif latest.earnings_consistency_label == 'Medium' %}
+              <span class="badge bg-warning text-dark">Medium</span>
+            {% elif latest.earnings_consistency_label == 'Low' %}
+              <span class="badge bg-danger">Low</span>
+            {% else %}
+              <span class="text-secondary">—</span>
+            {% endif %}
+            {% if latest.earnings_consistency_cv is not none %}
+              <span class="text-muted small ms-1">(CV {{ '%.2f' | format(latest.earnings_consistency_cv) }})</span>
+            {% endif %}
+          {% else %}
+            <span class="text-secondary">—</span>
+          {% endif %}
+        </div>
+        <div class="text-muted" style="font-size:.72rem;">Volatility of historical net income</div>
+      </div>
+
+      <div class="col-sm-6 col-md-3">
+        <div class="text-muted small">Capital Intensity</div>
+        <div class="fs-5 fw-bold mt-1">
+          {% if latest.capital_intensity is not none %}
+            {{ '%.1f' | format(latest.capital_intensity * 100) }}%
+            {% if latest.capital_intensity < 0.03 %}
+              <span class="badge bg-success ms-1">Asset-Light</span>
+            {% elif latest.capital_intensity <= 0.08 %}
+              <span class="badge bg-warning text-dark ms-1">Moderate</span>
+            {% else %}
+              <span class="badge bg-danger ms-1">High CapEx</span>
+            {% endif %}
+          {% else %}
+            <span class="text-secondary">—</span>
+          {% endif %}
+        </div>
+        <div class="text-muted" style="font-size:.72rem;">5-yr avg CapEx / Revenue</div>
+      </div>
+
+      <div class="col-sm-6 col-md-3">
+        <div class="text-muted small">Net Debt</div>
+        <div class="fs-5 fw-bold mt-1">
+          {% if latest.net_debt is not none %}
+            ${{ '{:,.0f}'.format(latest.net_debt) }}
+          {% else %}
+            <span class="text-secondary">—</span>
+          {% endif %}
+        </div>
+        <div class="text-muted" style="font-size:.72rem;">Subtracted from EV in DCF</div>
+      </div>
+
+      <div class="col-sm-6 col-md-3">
+        <div class="text-muted small">Normalized Owner Earnings</div>
+        <div class="fs-5 fw-bold mt-1">
+          {% if latest.normalized_owner_earnings is not none %}
+            ${{ '{:,.0f}'.format(latest.normalized_owner_earnings) }}
+            {% if latest.oe_is_noisy %}
+              <span class="badge bg-warning text-dark ms-1" title="Most recent year deviates >25% from 3-yr avg">Noisy</span>
+            {% endif %}
+          {% else %}
+            <span class="text-secondary">—</span>
+          {% endif %}
+        </div>
+        <div class="text-muted" style="font-size:.72rem;">3-yr average (used in DCF)</div>
+      </div>
+
+      <div class="col-sm-6 col-md-3">
+        <div class="text-muted small">Single-Year Owner Earnings</div>
+        <div class="fs-5 fw-bold mt-1">
+          {% if latest.owner_earnings is not none %}
+            ${{ '{:,.0f}'.format(latest.owner_earnings) }}
+          {% else %}
+            <span class="text-secondary">—</span>
+          {% endif %}
+        </div>
+        <div class="text-muted" style="font-size:.72rem;">Most recent FY (for reference)</div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+{# ── IV Sensitivity Table ── #}
+{% if latest.iv_sensitivity_low is not none or latest.iv_sensitivity_high is not none or latest.intrinsic_value is not none %}
+<div class="card mb-4">
+  <div class="card-header fw-semibold">
+    Intrinsic Value Sensitivity
+    <span class="float-end small fw-normal text-muted">How IV changes with discount rate</span>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered mb-0 text-center">
+        <thead class="table-light">
+          <tr>
+            <th>Discount Rate</th>
+            <th>{{ '%.1f' | format((discount_rate - 0.02) * 100) }}% <span class="text-muted small">(−2%)</span></th>
+            <th>{{ '%.1f' | format((discount_rate - 0.01) * 100) }}% <span class="text-muted small">(−1%)</span></th>
+            <th class="table-primary">{{ '%.1f' | format(discount_rate * 100) }}% <span class="text-muted small">(base)</span></th>
+            <th>{{ '%.1f' | format((discount_rate + 0.01) * 100) }}% <span class="text-muted small">(+1%)</span></th>
+            <th>{{ '%.1f' | format((discount_rate + 0.02) * 100) }}% <span class="text-muted small">(+2%)</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="fw-semibold text-muted small">IV / Share</td>
+            <td>{% if latest.iv_sensitivity_high is not none %}${{ '%.2f' | format(latest.iv_sensitivity_high) }}{% else %}—{% endif %}</td>
+            <td>—</td>
+            <td class="table-primary fw-bold">{% if latest.intrinsic_value is not none %}${{ '%.2f' | format(latest.intrinsic_value) }}{% else %}—{% endif %}</td>
+            <td>—</td>
+            <td>{% if latest.iv_sensitivity_low is not none %}${{ '%.2f' | format(latest.iv_sensitivity_low) }}{% else %}—{% endif %}</td>
+          </tr>
+          {% if price is not none %}
+          <tr>
+            <td class="fw-semibold text-muted small">MOS at ${{ '%.2f' | format(price) }}</td>
+            <td>{% if latest.iv_sensitivity_high is not none and latest.iv_sensitivity_high > 0 %}{{ '%.0f' | format((1 - price / latest.iv_sensitivity_high) * 100) }}%{% else %}—{% endif %}</td>
+            <td>—</td>
+            <td class="table-primary fw-bold">{% if mos is not none %}{{ '%.0f' | format(mos * 100) }}%{% else %}—{% endif %}</td>
+            <td>—</td>
+            <td>{% if latest.iv_sensitivity_low is not none and latest.iv_sensitivity_low > 0 %}{{ '%.0f' | format((1 - price / latest.iv_sensitivity_low) * 100) }}%{% else %}—{% endif %}</td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+    <p class="text-muted small px-3 py-2 mb-0">
+      The sensitivity table shows how the intrinsic value estimate changes with the discount rate.
+      A wide range indicates high model fragility — treat the point estimate with caution.
+    </p>
+  </div>
+</div>
+{% endif %}
+
 {# ── Historical fetch table ── #}
 <h5 class="mb-2">Fetch History</h5>
 <div class="table-responsive">

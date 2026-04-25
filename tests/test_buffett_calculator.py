@@ -6,14 +6,19 @@ All tests are pure — no Flask app, DB, or network calls.
 
 import pytest
 from app.buffett_calculator import (
+    calculate_capital_intensity,
+    calculate_earnings_consistency,
     calculate_intrinsic_value,
+    calculate_iv_sensitivity,
     calculate_margin_of_safety,
     calculate_operating_margins,
     calculate_owner_earnings,
+    calculate_predictability_rating,
     calculate_quality_score,
     calculate_roe_series,
     estimate_maintenance_capex,
     mos_signal,
+    normalize_owner_earnings,
     project_growth_rate,
     run_buffett_analysis,
 )
@@ -97,18 +102,26 @@ class TestProjectGrowthRate:
     def test_returns_default_for_empty_history(self):
         assert project_growth_rate({}) == pytest.approx(0.05)
 
-    def test_computes_cagr_correctly(self):
-        # 100 → 121 over 2 years = CAGR 10%
-        result = project_growth_rate({2020: 100, 2022: 121})
+    def test_computes_median_yoy_correctly(self):
+        # Consecutive annual history: each year grows 10%
+        # YoY pairs: 110/100-1=10%, 121/110-1=10%; median = 10%
+        result = project_growth_rate({2020: 100, 2021: 110, 2022: 121})
         assert result == pytest.approx(0.10, rel=1e-3)
 
+    def test_median_is_robust_to_outlier_year(self):
+        # One outlier year (2021 dip) should not dominate the median
+        # YoY pairs: -50%, +300%, +10%; median = 10%
+        result = project_growth_rate({2020: 100, 2021: 50, 2022: 200, 2023: 220})
+        assert result == pytest.approx(0.10, rel=0.05)
+
     def test_caps_at_15_percent(self):
-        # Very fast grower
-        result = project_growth_rate({2015: 10, 2023: 10_000})
+        # All YoY rates > 15%; cap applies
+        result = project_growth_rate({2020: 10, 2021: 100, 2022: 1_000})
         assert result == pytest.approx(0.15)
 
     def test_floors_at_zero_for_declining_company(self):
-        result = project_growth_rate({2020: 200, 2022: 100})
+        # All YoY rates negative; floor applied
+        result = project_growth_rate({2020: 200, 2021: 150, 2022: 100})
         assert result == 0.0
 
     def test_floors_at_zero_for_negative_start(self):
@@ -365,3 +378,174 @@ class TestRunBuffettAnalysis:
         iv_low = run_buffett_analysis(self._complete_data, 0.07)['intrinsic_value']
         iv_high = run_buffett_analysis(self._complete_data, 0.12)['intrinsic_value']
         assert iv_low > iv_high
+
+    def test_net_debt_reduces_intrinsic_value(self):
+        data_no_debt = {**self._complete_data, 'net_debt': 0.0}
+        data_with_debt = {**self._complete_data, 'net_debt': 50_000e6}
+        iv_no_debt = run_buffett_analysis(data_no_debt, 0.09)['intrinsic_value']
+        iv_with_debt = run_buffett_analysis(data_with_debt, 0.09)['intrinsic_value']
+        assert iv_no_debt > iv_with_debt
+
+    def test_sensitivity_table_is_returned(self):
+        result = run_buffett_analysis(self._complete_data, discount_rate=0.09)
+        sensitivity = result['sensitivity']
+        assert sensitivity is not None
+        assert 'r_minus_2' in sensitivity
+        assert 'base' in sensitivity
+        assert 'r_plus_2' in sensitivity
+        # More optimistic rate should give higher IV
+        assert sensitivity['r_minus_2'] > sensitivity['base'] > sensitivity['r_plus_2']
+
+    def test_predictability_rating_is_string(self):
+        result = run_buffett_analysis(self._complete_data, discount_rate=0.09)
+        assert result['predictability_rating'] in ('High', 'Medium', 'Low', 'Unknown')
+
+    def test_earnings_consistency_label_is_present(self):
+        result = run_buffett_analysis(self._complete_data, discount_rate=0.09)
+        assert result['earnings_consistency_label'] in ('High', 'Medium', 'Low', 'Unknown')
+
+    def test_normalized_owner_earnings_present(self):
+        result = run_buffett_analysis(self._complete_data, discount_rate=0.09)
+        assert result['normalized_owner_earnings'] is not None
+
+
+# ---------------------------------------------------------------------------
+# calculate_capital_intensity
+# ---------------------------------------------------------------------------
+
+class TestCalculateCapitalIntensity:
+    def test_returns_none_when_insufficient_years(self):
+        capex = {2021: 100, 2022: 200}
+        rev = {2021: 1000, 2022: 2000}
+        assert calculate_capital_intensity(capex, rev) is None
+
+    def test_computes_average_ratio_over_5_years(self):
+        capex = {yr: 100 for yr in range(2018, 2023)}
+        rev = {yr: 1000 for yr in range(2018, 2023)}
+        result = calculate_capital_intensity(capex, rev)
+        assert result == pytest.approx(0.10, rel=1e-3)
+
+    def test_returns_none_for_empty_inputs(self):
+        assert calculate_capital_intensity({}, {2021: 1000}) is None
+        assert calculate_capital_intensity({2021: 100}, {}) is None
+
+
+# ---------------------------------------------------------------------------
+# normalize_owner_earnings
+# ---------------------------------------------------------------------------
+
+class TestNormalizeOwnerEarnings:
+    def test_returns_average_of_recent_years(self):
+        # OE each year = NI + DA - CapEx = 100 + 20 - 10 = 110 per year
+        ni = {2021: 100, 2022: 100, 2023: 100}
+        da = {2021: 20, 2022: 20, 2023: 20}
+        capex = {2021: 10, 2022: 10, 2023: 10}
+        rev = {2021: 500, 2022: 500, 2023: 500}
+        oe, noisy = normalize_owner_earnings(ni, da, capex, rev)
+        assert oe == pytest.approx(110.0, rel=0.01)
+        assert noisy is False
+
+    def test_flags_noisy_when_recent_year_outlier(self):
+        # First two years OE ~110, last year spikes to 300
+        ni = {2021: 100, 2022: 100, 2023: 280}
+        da = {2021: 20, 2022: 20, 2023: 20}
+        capex = {2021: 10, 2022: 10, 2023: 10}
+        rev = {2021: 500, 2022: 500, 2023: 500}
+        oe, noisy = normalize_owner_earnings(ni, da, capex, rev)
+        assert noisy is True
+
+    def test_returns_none_for_empty_history(self):
+        oe, noisy = normalize_owner_earnings({}, {}, {}, {})
+        assert oe is None
+        assert noisy is False
+
+
+# ---------------------------------------------------------------------------
+# calculate_iv_sensitivity
+# ---------------------------------------------------------------------------
+
+class TestCalculateIvSensitivity:
+    def test_returns_five_keys(self):
+        result = calculate_iv_sensitivity(
+            owner_earnings=1_000_000,
+            growth_rate=0.08,
+            discount_rate=0.09,
+            shares=1_000_000,
+        )
+        assert set(result.keys()) == {'r_minus_2', 'r_minus_1', 'base', 'r_plus_1', 'r_plus_2'}
+
+    def test_lower_rate_gives_higher_iv(self):
+        result = calculate_iv_sensitivity(1_000_000, 0.08, 0.09, 1_000_000)
+        assert result['r_minus_2'] > result['r_minus_1'] > result['base']
+        assert result['base'] > result['r_plus_1'] > result['r_plus_2']
+
+    def test_net_debt_reduces_all_values(self):
+        no_debt = calculate_iv_sensitivity(1_000_000, 0.08, 0.09, 1_000_000, net_debt=0)
+        with_debt = calculate_iv_sensitivity(1_000_000, 0.08, 0.09, 1_000_000, net_debt=5_000_000)
+        assert no_debt['base'] > with_debt['base']
+
+
+# ---------------------------------------------------------------------------
+# calculate_earnings_consistency
+# ---------------------------------------------------------------------------
+
+class TestCalculateEarningsConsistency:
+    def test_high_consistency_for_stable_earner(self):
+        # Very stable earnings: 100, 101, 102, 103, 104 — tiny CV
+        ni = {yr: 100 + yr - 2020 for yr in range(2020, 2025)}
+        cv, label = calculate_earnings_consistency(ni)
+        assert label == 'High'
+        assert cv < 0.20
+
+    def test_low_consistency_for_volatile_earner(self):
+        ni = {2020: 10, 2021: 200, 2022: 5, 2023: 300, 2024: 8}
+        cv, label = calculate_earnings_consistency(ni)
+        assert label == 'Low'
+        assert cv > 0.50
+
+    def test_returns_unknown_for_insufficient_data(self):
+        cv, label = calculate_earnings_consistency({2021: 100, 2022: 200})
+        assert cv is None
+        assert label == 'Unknown'
+
+
+# ---------------------------------------------------------------------------
+# calculate_predictability_rating
+# ---------------------------------------------------------------------------
+
+class TestCalculatePredictabilityRating:
+    def test_high_when_all_signals_favorable(self):
+        result = calculate_predictability_rating(
+            quality_score=80,
+            earnings_consistency_label='High',
+            capital_intensity=0.02,
+        )
+        assert result == 'High'
+
+    def test_low_when_quality_score_below_40(self):
+        result = calculate_predictability_rating(
+            quality_score=30,
+            earnings_consistency_label='Medium',
+            capital_intensity=0.05,
+        )
+        assert result == 'Low'
+
+    def test_low_when_consistency_is_low(self):
+        result = calculate_predictability_rating(
+            quality_score=75,
+            earnings_consistency_label='Low',
+            capital_intensity=0.02,
+        )
+        assert result == 'Low'
+
+    def test_medium_when_mixed_signals(self):
+        result = calculate_predictability_rating(
+            quality_score=55,
+            earnings_consistency_label='Medium',
+            capital_intensity=0.06,
+        )
+        assert result == 'Medium'
+
+    def test_handles_none_inputs(self):
+        result = calculate_predictability_rating(None, 'Unknown', None)
+        assert result in ('High', 'Medium', 'Low')

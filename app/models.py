@@ -82,9 +82,18 @@ class Company(db.Model):
     div = db.Column(db.Float, nullable=True)
     div_date = db.Column(db.String(20), nullable=True)
     owner_earnings = db.Column(db.Float, nullable=True)
+    normalized_owner_earnings = db.Column(db.Float, nullable=True)
+    oe_is_noisy = db.Column(db.Boolean, nullable=True)
     intrinsic_value = db.Column(db.Float, nullable=True)
     quality_score = db.Column(db.Integer, nullable=True)
     growth_rate_used = db.Column(db.Float, nullable=True)
+    net_debt = db.Column(db.Float, nullable=True)
+    iv_sensitivity_low = db.Column(db.Float, nullable=True)   # IV at discount_rate + 2%
+    iv_sensitivity_high = db.Column(db.Float, nullable=True)  # IV at discount_rate - 2%
+    capital_intensity = db.Column(db.Float, nullable=True)
+    earnings_consistency_cv = db.Column(db.Float, nullable=True)
+    earnings_consistency_label = db.Column(db.String(10), nullable=True)
+    predictability_rating = db.Column(db.String(10), nullable=True)
     fetched_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     def to_dict(self) -> dict:
@@ -97,9 +106,18 @@ class Company(db.Model):
             'div': self.div,
             'div_date': self.div_date,
             'owner_earnings': self.owner_earnings,
+            'normalized_owner_earnings': self.normalized_owner_earnings,
+            'oe_is_noisy': self.oe_is_noisy,
             'intrinsic_value': self.intrinsic_value,
             'quality_score': self.quality_score,
             'growth_rate_used': self.growth_rate_used,
+            'net_debt': self.net_debt,
+            'iv_sensitivity_low': self.iv_sensitivity_low,
+            'iv_sensitivity_high': self.iv_sensitivity_high,
+            'capital_intensity': self.capital_intensity,
+            'earnings_consistency_cv': self.earnings_consistency_cv,
+            'earnings_consistency_label': self.earnings_consistency_label,
+            'predictability_rating': self.predictability_rating,
             'fetched_at': self.fetched_at.isoformat() if self.fetched_at else None,
         }
 
