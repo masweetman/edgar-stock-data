@@ -44,6 +44,42 @@ _CV_LOW_THRESHOLD = 0.50       # CV > 0.50: low consistency
 # Stage 1 helpers
 # ---------------------------------------------------------------------------
 
+def _filter_revenue_outliers(
+    common_years: list[int],
+    revenue_history: dict[int, float],
+) -> list[int]:
+    """Return *common_years* with revenue outliers removed.
+
+    Keeps only years where revenue falls within [0.3 × median, 3.0 × median].
+    This prevents a company that changed its revenue reporting basis (e.g.
+    switching from net segment revenues to gross commodity trading revenues)
+    from corrupting the CapEx-to-Revenue ratio used for maintenance CapEx
+    estimation.
+
+    When all years are within bounds, or when there are too few years to
+    compute a meaningful median, the original list is returned unchanged.
+    """
+    if len(common_years) < 2:
+        return common_years
+    rev_values = [revenue_history[y] for y in common_years]
+    median_rev = statistics.median(rev_values)
+    if median_rev == 0:
+        return common_years
+    filtered = [
+        y for y in common_years
+        if 0.3 * median_rev <= revenue_history[y] <= 3.0 * median_rev
+    ]
+    excluded = set(common_years) - set(filtered)
+    if excluded:
+        logger.info(
+            'Revenue outlier filter: excluded years %s (median revenue %.0f)',
+            sorted(excluded), median_rev,
+        )
+    # If filtering removes too many years, fall back to the full list to avoid
+    # erroneously triggering the < _MIN_CAPEX_YEARS_FOR_RATIO path.
+    return filtered if len(filtered) >= _MIN_CAPEX_YEARS_FOR_RATIO else common_years
+
+
 def estimate_maintenance_capex(
     capex_history: dict[int, float],
     revenue_history: dict[int, float],
@@ -68,6 +104,8 @@ def estimate_maintenance_capex(
     if len(common_years) < _MIN_CAPEX_YEARS_FOR_RATIO or not revenue_history:
         # Conservative fallback: use all CapEx as maintenance
         return latest_capex
+
+    common_years = _filter_revenue_outliers(common_years, revenue_history)
 
     ratios = [
         capex_history[y] / revenue_history[y]
@@ -99,6 +137,7 @@ def calculate_capital_intensity(
     common_years = sorted(set(capex_history) & set(revenue_history))
     if len(common_years) < _MIN_CAPEX_YEARS_FOR_RATIO:
         return None
+    common_years = _filter_revenue_outliers(common_years, revenue_history)
     ratios = [
         capex_history[y] / revenue_history[y]
         for y in common_years
@@ -143,10 +182,12 @@ def normalize_owner_earnings(
         return None, False
 
     # Use the ratio computed from all available history for maintenance CapEx
-    # but apply it year-by-year
+    # but apply it year-by-year. Filter out revenue outliers first to prevent
+    # a changed revenue reporting basis from corrupting the ratio.
     capex_revenue_ratio: float | None = None
     common_years = sorted(set(capex_history) & set(revenue_history))
     if len(common_years) >= _MIN_CAPEX_YEARS_FOR_RATIO:
+        common_years = _filter_revenue_outliers(common_years, revenue_history)
         ratios = [
             capex_history[y] / revenue_history[y]
             for y in common_years

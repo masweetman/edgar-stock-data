@@ -62,6 +62,27 @@ class TestEstimateMaintenanceCapex:
         result = estimate_maintenance_capex(capex, revenue)
         assert result == pytest.approx(50.0, rel=1e-3)
 
+    def test_outlier_revenue_years_are_excluded_from_ratio(self):
+        # ADM-style: 5 pre-2020 years at ~$16B, 5 post-2020 years at ~$80B.
+        # CapEx ~$1B throughout. Without filtering, avg ratio ≈ 3.6%, which
+        # applied to $80B gives ~$2.9B — far too high.
+        # With filtering (3x-median test), the low-revenue years (median ~$48B,
+        # 0.3*median ≈ $14.4B) will be excluded, leaving only the consistent
+        # high-revenue years. The ratio on those should be ~1.25-1.5%, giving
+        # maintenance CapEx close to actual CapEx (~$1.2B).
+        capex = {
+            2016: 1_000, 2017: 1_000, 2018: 1_000, 2019: 1_000, 2020: 1_000,
+            2021: 1_000, 2022: 1_000, 2023: 1_000, 2024: 1_000, 2025: 1_000,
+        }
+        revenue = {
+            2016: 16_000, 2017: 16_000, 2018: 16_000, 2019: 16_000, 2020: 64_000,
+            2021: 85_000, 2022: 100_000, 2023: 80_000, 2024: 85_000, 2025: 80_000,
+        }
+        result = estimate_maintenance_capex(capex, revenue)
+        # Unfiltered avg ratio would be ~3.4%; filtered on recent high-revenue years
+        # ratio is ~1.2-1.25%. Either way, maint capex should be well below 2_000.
+        assert result < 2_000, f'Expected maint capex < 2000 but got {result}'
+
 
 # ---------------------------------------------------------------------------
 # calculate_owner_earnings
@@ -538,6 +559,23 @@ class TestCalculateCapitalIntensity:
         assert calculate_capital_intensity({}, {2021: 1000}) is None
         assert calculate_capital_intensity({2021: 100}, {}) is None
 
+    def test_outlier_revenue_years_excluded_from_intensity_ratio(self):
+        # 5 clean years at ratio ~1% and 5 outlier years with 10x revenue
+        # (ratio ~0.1%). Outlier years should be excluded; result should be ~1%.
+        capex = {yr: 10 for yr in range(2016, 2026)}
+        revenue = {
+            2016: 200, 2017: 200, 2018: 200, 2019: 200, 2020: 200,
+            2021: 2_000, 2022: 2_000, 2023: 2_000, 2024: 2_000, 2025: 2_000,
+        }
+        result = calculate_capital_intensity(capex, revenue)
+        # The two revenue regimes (200 vs 2000) are 10x apart, so the
+        # lower-revenue years are outliers. After filtering, only the
+        # high-revenue years (ratio = 0.5%) remain, giving a result < 0.01.
+        assert result is not None
+        # Without filtering: avg = (5*(10/200) + 5*(10/2000))/10 = (0.25+0.025)/10 = 0.0275
+        # With filtering (one cluster excluded): should equal 10/2000 = 0.005
+        assert result < 0.01, f'Expected capital intensity < 0.01 but got {result}'
+
 
 # ---------------------------------------------------------------------------
 # normalize_owner_earnings
@@ -567,6 +605,22 @@ class TestNormalizeOwnerEarnings:
         oe, noisy = normalize_owner_earnings({}, {}, {}, {})
         assert oe is None
         assert noisy is False
+
+    def test_outlier_revenue_does_not_collapse_owner_earnings(self):
+        # ADM-style scenario: 7 low-revenue years followed by 3 high-revenue years.
+        # Without outlier filtering the avg ratio is inflated, maintenance CapEx
+        # exceeds earnings, and normalized OE collapses near zero.
+        # With filtering the ratio is computed on consistent years only and OE is positive.
+        ni = {yr: 1_500 for yr in range(2016, 2026)}
+        da = {yr: 1_000 for yr in range(2016, 2026)}
+        capex = {yr: 1_200 for yr in range(2016, 2026)}
+        revenue = {
+            2016: 16_000, 2017: 16_000, 2018: 16_000, 2019: 16_000, 2020: 64_000,
+            2021: 85_000, 2022: 100_000, 2023: 80_000, 2024: 85_000, 2025: 80_000,
+        }
+        oe, _ = normalize_owner_earnings(ni, da, capex, revenue)
+        assert oe is not None
+        assert oe > 0, f'Expected positive normalized OE but got {oe}'
 
 
 # ---------------------------------------------------------------------------

@@ -175,9 +175,13 @@ def _fetch_ticker(ticker: str) -> dict[str, Any]:
         df, _CONCEPT_CAPEX, _CONCEPT_CAPEX_ALT, ticker)
     entry['revenue_history'] = _get_annual_series_with_fallbacks(
         df,
-        [_CONCEPT_REVENUE, _CONCEPT_REVENUE_ALT, _CONCEPT_REVENUE_ALT2, _CONCEPT_REVENUE_ALT3],
+        # ASC 606 concept first — used by most post-2018 filers and more consistently
+        # scoped to operating revenues only. us-gaap:Revenues is kept as fallback because
+        # some older filers never adopted the 606 taxonomy.
+        [_CONCEPT_REVENUE_ALT, _CONCEPT_REVENUE, _CONCEPT_REVENUE_ALT2, _CONCEPT_REVENUE_ALT3],
         ticker,
     )
+    _warn_if_sparse_revenue(entry['revenue_history'], ticker)
     entry['operating_income_history'] = _get_annual_series(df, _CONCEPT_OP_INCOME, ticker)
     entry['long_term_debt'] = _latest_annual_value_with_fallbacks(
         df,
@@ -594,3 +598,22 @@ def _latest_annual_value_with_fallbacks(
         if val is not None:
             return val
     return None
+
+
+def _warn_if_sparse_revenue(revenue_history: dict[int, float], ticker: str) -> None:
+    """Warn when revenue history has fewer than 5 entries in the last 5 fiscal years.
+
+    Sparse revenue coverage means the CapEx-to-Revenue ratio will be computed from
+    too few years, making maintenance CapEx estimates unreliable.
+    """
+    if not revenue_history:
+        logger.warning('[%s] Revenue history is empty — maintenance CapEx will use raw CapEx fallback', ticker)
+        return
+    latest_year = max(revenue_history)
+    recent_years_present = sum(1 for y in revenue_history if y >= latest_year - 4)
+    if recent_years_present < 5:
+        logger.warning(
+            '[%s] Revenue history has only %d of the last 5 fiscal years (%s) — '
+            'CapEx/Revenue ratio may be unreliable',
+            ticker, recent_years_present, sorted(revenue_history),
+        )
