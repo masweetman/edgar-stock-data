@@ -352,14 +352,14 @@ def calculate_quality_score(
     """0–100 quality score based on three Buffett criteria.
 
     ROE sub-score  (0–40): fraction of years where ROE > 15%, scaled to 40 pts.
-    Debt sub-score (0–30): full 30 pts if net_debt is 0 (debt-free or net-cash);
+    Debt sub-score (0–30): full 30 pts if net_debt <= 0 (net-cash position or debt-free);
                            full 30 pts if OE pays off net debt in < 3 years;
                            partial credit for up to 6 years; 0 pts beyond 6 years.
     Margin sub-score (0–30): full 30 pts if margins are stable or widening;
                               partial if flat; 0 if declining.
 
-    net_debt should be max(0, total_debt - cash): pass the EV-bridge net_debt
-    value so that net-cash companies receive full debt score automatically.
+    net_debt is total_debt - cash; negative values indicate a net-cash position
+    and automatically receive full debt score.
 
     Returns None if there is insufficient data to score any sub-category
     (all three would return 0 with no data, which is misleading).
@@ -376,15 +376,20 @@ def calculate_quality_score(
         roe_score = 0
 
     # --- Debt sub-score ---
-    # net_debt == 0 means either no debt or more cash than debt (net-cash position).
-    if net_debt is not None and owner_earnings and owner_earnings > 0:
-        payoff_years = net_debt / owner_earnings
-        if payoff_years <= _DEBT_PAYOFF_YEARS:
-            debt_score = _DEBT_MAX_POINTS
-        elif payoff_years <= _DEBT_PAYOFF_YEARS * 2:
-            # Linear interpolation between 3 and 6 years → 0–30 pts
-            fraction = 1.0 - (payoff_years - _DEBT_PAYOFF_YEARS) / _DEBT_PAYOFF_YEARS
-            debt_score = int(round(_DEBT_MAX_POINTS * fraction))
+    # net_debt <= 0 means net-cash position (cash exceeds total debt) — full score.
+    if net_debt is not None:
+        if net_debt <= 0:
+            debt_score = _DEBT_MAX_POINTS  # net-cash: no debt burden
+        elif owner_earnings and owner_earnings > 0:
+            payoff_years = net_debt / owner_earnings
+            if payoff_years <= _DEBT_PAYOFF_YEARS:
+                debt_score = _DEBT_MAX_POINTS
+            elif payoff_years <= _DEBT_PAYOFF_YEARS * 2:
+                # Linear interpolation between 3 and 6 years → 0–30 pts
+                fraction = 1.0 - (payoff_years - _DEBT_PAYOFF_YEARS) / _DEBT_PAYOFF_YEARS
+                debt_score = int(round(_DEBT_MAX_POINTS * fraction))
+            else:
+                debt_score = 0
         else:
             debt_score = 0
     else:
@@ -537,6 +542,7 @@ def run_buffett_analysis(
         'growth_rate_used': None,
         'discount_rate_used': None,
         'net_debt': None,
+        'debt_unreliable': False,
         'capital_intensity': None,
         'earnings_consistency_cv': None,
         'earnings_consistency_label': 'Unknown',
@@ -556,8 +562,10 @@ def run_buffett_analysis(
         equity_history: dict[int, float] = ticker_data.get('equity_history') or {}
         shares: float | None = ticker_data.get('shares_outstanding')
         net_debt: float = ticker_data.get('net_debt') or 0.0
+        debt_unreliable: bool = ticker_data.get('debt_unreliable') or False
 
         result['net_debt'] = net_debt
+        result['debt_unreliable'] = debt_unreliable
 
         # --- Capital Intensity (informational, independent of DCF) ---
         capital_intensity = calculate_capital_intensity(capex_history, revenue_history)
@@ -624,6 +632,13 @@ def run_buffett_analysis(
         if oe_for_dcf is None or shares is None or shares <= 0:
             result['error'] = 'Insufficient data for DCF (missing net income or shares).'
             # Still attempt supplemental metrics below
+        elif debt_unreliable:
+            result['error'] = (
+                'Intrinsic value not calculated: debt data is unreliable '
+                '(captured debt <15% of total liabilities — financing subsidiaries '
+                'such as captive finance arms may not be reflected).'
+            )
+            # IV, sensitivity, and growth_rate_used remain None
         else:
             # Stage 2: Growth Rate + Intrinsic Value
             growth_rate = project_growth_rate(net_income_history)

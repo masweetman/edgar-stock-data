@@ -88,6 +88,7 @@ class Company(db.Model):
     quality_score = db.Column(db.Integer, nullable=True)
     growth_rate_used = db.Column(db.Float, nullable=True)
     net_debt = db.Column(db.Float, nullable=True)
+    debt_unreliable = db.Column(db.Boolean, nullable=True)
     iv_sensitivity_low = db.Column(db.Float, nullable=True)   # IV at discount_rate + 2%
     iv_sensitivity_high = db.Column(db.Float, nullable=True)  # IV at discount_rate - 2%
     capital_intensity = db.Column(db.Float, nullable=True)
@@ -121,6 +122,7 @@ class Company(db.Model):
             'quality_score': self.quality_score,
             'growth_rate_used': self.growth_rate_used,
             'net_debt': self.net_debt,
+            'debt_unreliable': self.debt_unreliable,
             'iv_sensitivity_low': self.iv_sensitivity_low,
             'iv_sensitivity_high': self.iv_sensitivity_high,
             'capital_intensity': self.capital_intensity,

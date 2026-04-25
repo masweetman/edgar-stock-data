@@ -41,6 +41,9 @@ _CONCEPT_REVENUE_ALT3 = 'us-gaap:SalesRevenueGoodsNet'
 _CONCEPT_OP_INCOME = 'us-gaap:OperatingIncomeLoss'
 _CONCEPT_LT_DEBT = 'us-gaap:LongTermDebt'
 _CONCEPT_LT_DEBT_ALT = 'us-gaap:LongTermDebtNoncurrent'
+_CONCEPT_LT_DEBT_ALT2 = 'us-gaap:LongTermDebtAndCapitalLeaseObligations'
+_CONCEPT_LT_DEBT_ALT3 = 'us-gaap:NotesPayable'
+_CONCEPT_LT_DEBT_ALT4 = 'us-gaap:DebtAndCapitalLeaseObligations'
 _CONCEPT_ST_DEBT = 'us-gaap:ShortTermBorrowings'
 _CONCEPT_ST_DEBT_ALT = 'us-gaap:DebtCurrent'
 _CONCEPT_EQUITY = 'us-gaap:StockholdersEquity'
@@ -109,6 +112,7 @@ def _fetch_ticker(ticker: str) -> dict[str, Any]:
         'short_term_debt': None,
         'cash': None,
         'net_debt': None,
+        'debt_unreliable': False,
         'equity': None,
         'equity_history': {},
         'shares_outstanding': None,
@@ -175,8 +179,17 @@ def _fetch_ticker(ticker: str) -> dict[str, Any]:
         ticker,
     )
     entry['operating_income_history'] = _get_annual_series(df, _CONCEPT_OP_INCOME, ticker)
-    entry['long_term_debt'] = _latest_annual_value_with_fallback(
-        df, _CONCEPT_LT_DEBT, _CONCEPT_LT_DEBT_ALT, ticker)
+    entry['long_term_debt'] = _latest_annual_value_with_fallbacks(
+        df,
+        [
+            _CONCEPT_LT_DEBT,
+            _CONCEPT_LT_DEBT_ALT,
+            _CONCEPT_LT_DEBT_ALT2,
+            _CONCEPT_LT_DEBT_ALT3,
+            _CONCEPT_LT_DEBT_ALT4,  # combined total debt+leases — for captive-finance filers like Ford
+        ],
+        ticker,
+    )
     entry['short_term_debt'] = _latest_annual_value_with_fallback(
         df, _CONCEPT_ST_DEBT, _CONCEPT_ST_DEBT_ALT, ticker)
     entry['cash'] = _latest_annual_value_with_fallback(
@@ -188,12 +201,28 @@ def _fetch_ticker(ticker: str) -> dict[str, Any]:
         _latest_annual_value(df, _CONCEPT_SHARES_BASIC, ticker)
         or _latest_annual_value(df, _CONCEPT_SHARES_OUTSTANDING, ticker)
     )
-    # Derive net debt for the EV→Equity bridge (non-negative floor).
-    # Includes both long-term and short-term debt obligations.
+    # Derive net debt for the EV→Equity bridge.
+    # Negative means net-cash (cash exceeds total debt) — this is meaningful and preserved.
     lt_debt = entry['long_term_debt'] or 0.0
     st_debt = entry['short_term_debt'] or 0.0
     cash = entry['cash'] or 0.0
-    entry['net_debt'] = max(0.0, lt_debt + st_debt - cash)
+    entry['net_debt'] = lt_debt + st_debt - cash
+
+    # Flag when captured debt looks implausibly small relative to total liabilities.
+    # This catches companies with large financing subsidiaries (e.g. Ford Motor Credit)
+    # whose debt is filed under non-standard XBRL concepts not yet in our fallback chain.
+    total_liabilities = _latest_annual_value(df, _CONCEPT_LIABILITIES, ticker) or 0.0
+    captured_debt = lt_debt + st_debt
+    entry['debt_unreliable'] = (
+        total_liabilities > 0
+        and captured_debt < 0.15 * total_liabilities
+    )
+    if entry['debt_unreliable']:
+        logger.warning(
+            '[%s] debt_unreliable=True: captured debt %.0f is <15%% of total liabilities %.0f',
+            ticker, captured_debt, total_liabilities,
+        )
+
     logger.info(
         '[%s] Buffett data: net_income years=%s, da years=%s, capex years=%s, '
         'revenue years=%s, equity=%s, shares=%s, cash=%s, st_debt=%s, net_debt=%s',
@@ -550,3 +579,18 @@ def _get_annual_series_with_fallbacks(
         if result:
             return result
     return {}
+
+
+def _latest_annual_value_with_fallbacks(
+    df, concepts: list[str], ticker: str = ''
+) -> float | None:
+    """Return the most recent annual value for the first concept in *concepts* that has data.
+
+    Tries each concept in order; returns the first non-None result.
+    Returns None if none of the concepts has annual data.
+    """
+    for concept in concepts:
+        val = _latest_annual_value(df, concept, ticker)
+        if val is not None:
+            return val
+    return None

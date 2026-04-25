@@ -174,15 +174,31 @@
       </div>
 
       <div class="col-sm-6 col-md-3">
-        <div class="text-muted small">Net Debt</div>
-        <div class="fs-5 fw-bold mt-1">
-          {% if latest.net_debt is not none %}
+        {% if latest.net_debt is not none and latest.net_debt < 0 %}
+          <div class="text-muted small">Net Cash</div>
+          <div class="fs-5 fw-bold mt-1 text-success">
+            ${{ '{:,.0f}'.format(-latest.net_debt) }}
+            {% if latest.debt_unreliable %}
+              <span class="badge bg-danger ms-1" title="Captured debt is &lt;15% of total liabilities — financing subsidiaries (e.g. captive arms like Ford Motor Credit) may not be reflected">⚠ Debt incomplete</span>
+            {% endif %}
+          </div>
+          <div class="text-muted" style="font-size:.72rem;">Cash exceeds debt — adds to equity value</div>
+        {% elif latest.net_debt is not none %}
+          <div class="text-muted small">Net Debt</div>
+          <div class="fs-5 fw-bold mt-1">
             ${{ '{:,.0f}'.format(latest.net_debt) }}
-          {% else %}
+            {% if latest.debt_unreliable %}
+              <span class="badge bg-danger ms-1" title="Captured debt is &lt;15% of total liabilities — financing subsidiaries (e.g. captive arms like Ford Motor Credit) may not be reflected">⚠ Debt incomplete</span>
+            {% endif %}
+          </div>
+          <div class="text-muted" style="font-size:.72rem;">Subtracted from EV in DCF</div>
+        {% else %}
+          <div class="text-muted small">Net Debt</div>
+          <div class="fs-5 fw-bold mt-1">
             <span class="text-secondary">—</span>
-          {% endif %}
-        </div>
-        <div class="text-muted" style="font-size:.72rem;">Subtracted from EV in DCF</div>
+          </div>
+          <div class="text-muted" style="font-size:.72rem;">Subtracted from EV in DCF</div>
+        {% endif %}
       </div>
 
       <div class="col-sm-6 col-md-3">

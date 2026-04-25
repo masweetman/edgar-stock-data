@@ -6,7 +6,11 @@ Pure tests — no Flask app, DB, or network calls.
 
 import pandas as pd
 import pytest
-from app.edgar_service import _annualise_dividend, _get_dividends
+from app.edgar_service import (
+    _annualise_dividend,
+    _get_dividends,
+    _latest_annual_value_with_fallbacks,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -143,3 +147,76 @@ class TestGetDividends:
         div, date = _get_dividends(df, 'TEST')
         assert div is None
         assert date is None
+
+
+# ---------------------------------------------------------------------------
+# _latest_annual_value_with_fallbacks
+# ---------------------------------------------------------------------------
+
+def _make_facts_df(concept: str, value: float, fiscal_period: str = 'FY') -> pd.DataFrame:
+    """Build a minimal single-row facts dataframe."""
+    return pd.DataFrame([{
+        'concept': concept,
+        'numeric_value': value,
+        'fiscal_period': fiscal_period,
+        'period_end': '2024-12-31',
+    }])
+
+
+class TestLatestAnnualValueWithFallbacks:
+    def test_returns_primary_when_present(self):
+        df = _make_facts_df('us-gaap:LongTermDebt', 1_000.0)
+        result = _latest_annual_value_with_fallbacks(
+            df,
+            ['us-gaap:LongTermDebt', 'us-gaap:LongTermDebtNoncurrent',
+             'us-gaap:LongTermDebtAndCapitalLeaseObligations'],
+            'TEST',
+        )
+        assert result == 1_000.0
+
+    def test_falls_back_to_third_concept_when_primary_and_alt_absent(self):
+        # Only the third concept has data (simulates Ford-like filing)
+        df = _make_facts_df('us-gaap:LongTermDebtAndCapitalLeaseObligations', 99_000_000_000.0)
+        result = _latest_annual_value_with_fallbacks(
+            df,
+            ['us-gaap:LongTermDebt', 'us-gaap:LongTermDebtNoncurrent',
+             'us-gaap:LongTermDebtAndCapitalLeaseObligations', 'us-gaap:NotesPayable'],
+            'TEST',
+        )
+        assert result == 99_000_000_000.0
+
+    def test_falls_back_to_fourth_concept_when_first_three_absent(self):
+        df = _make_facts_df('us-gaap:NotesPayable', 500_000_000.0)
+        result = _latest_annual_value_with_fallbacks(
+            df,
+            ['us-gaap:LongTermDebt', 'us-gaap:LongTermDebtNoncurrent',
+             'us-gaap:LongTermDebtAndCapitalLeaseObligations', 'us-gaap:NotesPayable'],
+            'TEST',
+        )
+        assert result == 500_000_000.0
+
+    def test_falls_back_to_fifth_concept_ford_style(self):
+        # Simulates Ford Motor Credit filer: only DebtAndCapitalLeaseObligations present
+        df = _make_facts_df('us-gaap:DebtAndCapitalLeaseObligations', 154_287_000_000.0)
+        result = _latest_annual_value_with_fallbacks(
+            df,
+            ['us-gaap:LongTermDebt', 'us-gaap:LongTermDebtNoncurrent',
+             'us-gaap:LongTermDebtAndCapitalLeaseObligations', 'us-gaap:NotesPayable',
+             'us-gaap:DebtAndCapitalLeaseObligations'],
+            'TEST',
+        )
+        assert result == 154_287_000_000.0
+
+    def test_returns_none_when_no_concept_matches(self):
+        df = _make_facts_df('us-gaap:SomeOtherConcept', 42.0)
+        result = _latest_annual_value_with_fallbacks(
+            df,
+            ['us-gaap:LongTermDebt', 'us-gaap:LongTermDebtNoncurrent'],
+            'TEST',
+        )
+        assert result is None
+
+    def test_empty_concepts_list_returns_none(self):
+        df = _make_facts_df('us-gaap:LongTermDebt', 1_000.0)
+        result = _latest_annual_value_with_fallbacks(df, [], 'TEST')
+        assert result is None

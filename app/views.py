@@ -364,6 +364,7 @@ def api_fetch():
         entry.quality_score = buffett.get('quality_score')
         entry.growth_rate_used = buffett.get('growth_rate_used')
         entry.net_debt = buffett.get('net_debt')
+        entry.debt_unreliable = buffett.get('debt_unreliable')
         sensitivity = buffett.get('sensitivity') or {}
         entry.iv_sensitivity_low = sensitivity.get('r_plus_2')   # most conservative
         entry.iv_sensitivity_high = sensitivity.get('r_minus_2')  # most optimistic

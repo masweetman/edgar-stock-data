@@ -303,6 +303,16 @@ class TestCalculateQualityScore:
         )
         assert score == 30  # full debt score for net-cash company
 
+    def test_negative_net_debt_gives_full_debt_score(self):
+        # net_debt < 0 means cash exceeds all debt (strong net-cash position)
+        score = calculate_quality_score(
+            roe_series={},
+            net_debt=-5_000_000_000,
+            owner_earnings=100,
+            margin_series={},
+        )
+        assert score == 30  # full debt score regardless of magnitude
+
 
 # ---------------------------------------------------------------------------
 # calculate_margin_of_safety
@@ -421,6 +431,34 @@ class TestRunBuffettAnalysis:
         iv_no_debt = run_buffett_analysis(data_no_debt, 0.09)['intrinsic_value']
         iv_with_debt = run_buffett_analysis(data_with_debt, 0.09)['intrinsic_value']
         assert iv_no_debt > iv_with_debt
+
+    def test_negative_net_debt_increases_intrinsic_value(self):
+        # A net-cash company (negative net_debt) should yield a higher IV
+        # than a debt-free company (net_debt=0), because cash surplus is added
+        # to equity value via the EV bridge.
+        data_no_debt = {**self._complete_data, 'net_debt': 0.0}
+        data_net_cash = {**self._complete_data, 'net_debt': -20_000e6}
+        iv_no_debt = run_buffett_analysis(data_no_debt, 0.09)['intrinsic_value']
+        iv_net_cash = run_buffett_analysis(data_net_cash, 0.09)['intrinsic_value']
+        assert iv_net_cash > iv_no_debt
+
+    def test_debt_unreliable_suppresses_iv_and_sensitivity(self):
+        data = {**self._complete_data, 'debt_unreliable': True}
+        result = run_buffett_analysis(data, discount_rate=0.09)
+        assert result['intrinsic_value'] is None
+        assert result['sensitivity'] is None
+        assert result['growth_rate_used'] is None
+        assert result['error'] is not None
+        # Non-DCF fields should still be computed
+        assert result['quality_score'] is not None
+        assert result['normalized_owner_earnings'] is not None
+        assert result['debt_unreliable'] is True
+
+    def test_debt_unreliable_false_computes_iv_normally(self):
+        data = {**self._complete_data, 'debt_unreliable': False}
+        result = run_buffett_analysis(data, discount_rate=0.09)
+        assert result['intrinsic_value'] is not None
+        assert result['error'] is None
 
     def test_sensitivity_table_is_returned(self):
         result = run_buffett_analysis(self._complete_data, discount_rate=0.09)
