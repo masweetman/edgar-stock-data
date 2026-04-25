@@ -1,6 +1,7 @@
 import logging
 import os
 from flask import Flask, jsonify, redirect, request, url_for
+from werkzeug.middleware.proxy_fix import ProxyFix
 from flask_admin import Admin
 from flask_bootstrap import Bootstrap
 from flask_caching import Cache
@@ -29,6 +30,11 @@ def create_app(config_name: str | None = None) -> Flask:
 
     app = Flask(__name__)
     app.config.from_object(config_map[config_name])
+
+    # Trust exactly one hop of reverse-proxy headers (OLS → gunicorn).
+    # Without this, Flask-Limiter sees 127.0.0.1 for every request and
+    # all users share a single rate-limit bucket.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
     # Extensions
     db.init_app(app)
@@ -76,6 +82,12 @@ def create_app(config_name: str | None = None) -> Flask:
     def not_found(e):
         if request.path.startswith('/api/'):
             return jsonify({'success': False, 'error': 'Not found.'}), 404
+        return e
+
+    @app.errorhandler(429)
+    def rate_limit_exceeded(e):
+        if request.path.startswith('/api/'):
+            return jsonify({'success': False, 'error': 'Rate limit exceeded. Try again later.'}), 429
         return e
 
     @app.errorhandler(500)
