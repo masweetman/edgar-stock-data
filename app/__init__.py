@@ -65,6 +65,7 @@ def create_app(config_name: str | None = None) -> Flask:
             "default-src 'self'; "
             "script-src 'self' https://cdn.jsdelivr.net; "
             "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "connect-src 'self' https://cdn.jsdelivr.net; "
             "img-src 'self' data:; "
             "object-src 'none'; "
             "frame-ancestors 'none';"
