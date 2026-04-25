@@ -74,9 +74,6 @@ def _tickers_from_text(text: str) -> list[str]:
     return [t for t in (t.strip().upper() for t in text.splitlines() if t.strip()) if valid.match(t)]
 
 
-def _years_from_text(text: str) -> list[str]:
-    return [y for y in (y.strip() for y in text.splitlines() if y.strip()) if len(y.strip()) == 4 and y.strip().isdigit() and 1900 <= int(y.strip()) <= 2099]
-
 
 # ---------------------------------------------------------------------------
 # HTML Routes
@@ -224,13 +221,11 @@ def config():
     if request.method == 'GET':
         form.sec_email.data = cfg.sec_email
         form.tickers.data = '\n'.join(cfg.tickers)
-        form.years.data = '\n'.join(cfg.years)
         form.discount_rate.data = cfg.discount_rate
 
     if form.validate_on_submit():
         cfg.sec_email = form.sec_email.data
         cfg.tickers = _tickers_from_text(form.tickers.data)
-        cfg.years = _years_from_text(form.years.data)
         cfg.discount_rate = float(form.discount_rate.data)
         db.session.commit()
         return redirect(url_for('main.dashboard'))
@@ -241,41 +236,43 @@ def config():
 @main.route('/dashboard')
 @login_required
 def dashboard():
-    entries = (
-        Company.query
-        .filter_by(user_id=current_user.id)
-        .order_by(Company.ticker, Company.fetched_at.desc())
-        .all()
-    )
-    # Show only the most recent fetch per ticker
-    seen: set[str] = set()
-    latest: list[Company] = []
-    for entry in entries:
-        if entry.ticker not in seen:
-            seen.add(entry.ticker)
-            latest.append(entry)
+    cfg = current_user.config
+    tickers = cfg.tickers if cfg else []
+
+    entries: list[Company] = []
+    if tickers:
+        entries = (
+            Company.query
+            .filter(Company.ticker.in_(tickers))
+            .order_by(Company.ticker)
+            .all()
+        )
 
     prices: dict[str, float | None] = {}
-    for entry in latest:
+    for entry in entries:
         prices[entry.ticker] = _yf_price(entry.ticker)
 
-    cfg = current_user.config
-    return render_template('dashboard.html', entries=latest, prices=prices, config=cfg)
+    return render_template('dashboard.html', entries=entries, prices=prices, config=cfg)
 
 
 @main.route('/company/<ticker>')
 @login_required
 def company(ticker: str):
     from app.buffett_calculator import calculate_margin_of_safety, mos_signal as _mos_signal
+    from flask import abort
+
+    ticker_upper = ticker.upper()
+    cfg = current_user.config
+    if cfg is None or ticker_upper not in cfg.tickers:
+        abort(403)
 
     entries = (
         Company.query
-        .filter_by(user_id=current_user.id, ticker=ticker.upper())
+        .filter_by(ticker=ticker_upper)
         .order_by(Company.fetched_at.desc())
         .all()
     )
     if not entries:
-        from flask import abort
         abort(404)
 
     price: float | None = _yf_price(ticker)
@@ -306,8 +303,8 @@ def company(ticker: str):
 @limiter.limit('10 per hour')
 def api_fetch():
     cfg = current_user.config
-    if cfg is None or not cfg.sec_email or not cfg.tickers or not cfg.years:
-        return jsonify({'success': False, 'error': 'Please configure your tickers, years, and SEC email first.'}), 400
+    if cfg is None or not cfg.sec_email or not cfg.tickers:
+        return jsonify({'success': False, 'error': 'Please configure your tickers and SEC email first.'}), 400
 
     # Capture log output from the edgar service during the fetch so the UI can display it.
     class _ListHandler(logging.Handler):
@@ -334,7 +331,7 @@ def api_fetch():
 
     try:
         verify_ssl = current_app.config.get('EDGAR_VERIFY_SSL', True)
-        results = fetch_data(cfg.sec_email, cfg.tickers, cfg.years, verify_ssl=verify_ssl)
+        results = fetch_data(cfg.sec_email, cfg.tickers, verify_ssl=verify_ssl)
     except Exception as exc:
         logging.getLogger('app').error('Edgar fetch error for user %s: %s', current_user.id, exc)
         return jsonify({'success': False, 'error': 'Failed to fetch data from SEC EDGAR.', 'logs': log_handler.lines}), 502
@@ -349,9 +346,9 @@ def api_fetch():
     saved = []
     for ticker, data in results.items():
         buffett = run_buffett_analysis(data, discount_rate)
-        entry = Company.query.filter_by(user_id=current_user.id, ticker=ticker).first()
+        entry = Company.query.filter_by(ticker=ticker).first()
         if entry is None:
-            entry = Company(user_id=current_user.id, ticker=ticker)
+            entry = Company(ticker=ticker)
             db.session.add(entry)
         entry.cik = data.get('cik')
         entry.eps_avg = data.get('eps_avg')

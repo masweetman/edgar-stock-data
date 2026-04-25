@@ -88,33 +88,11 @@ class TestUserConfigModel:
         reloaded = _db.session.get(UserConfig, cfg.id)
         assert reloaded.tickers == []
 
-    def test_years_property_roundtrip(self, db):
-        # Arrange
-        u = User(username='yeartest', email='year@example.com')
-        u.set_password('password123')
-        _db.session.add(u)
-        _db.session.commit()
-        cfg = UserConfig(user_id=u.id, sec_email='year@example.com')
-        _db.session.add(cfg)
-
-        # Act
-        cfg.years = ['2021', '2022', '2023']
-        _db.session.commit()
-
-        # Assert
-        reloaded = _db.session.get(UserConfig, cfg.id)
-        assert reloaded.years == ['2021', '2022', '2023']
-
 
 class TestCompanyModel:
     def test_to_dict_contains_required_keys(self, db):
         # Arrange
-        u = User(username='dicttest', email='dict@example.com')
-        u.set_password('password123')
-        _db.session.add(u)
-        _db.session.commit()
         entry = Company(
-            user_id=u.id,
             ticker='AAPL',
             cik='0000320193',
             eps_avg=6.11,
@@ -139,11 +117,7 @@ class TestCompanyModel:
         assert '2024-01-01' in d['fetched_at']
 
     def test_to_dict_handles_none_fields(self, db):
-        u = User(username='nonetest', email='none@example.com')
-        u.set_password('password123')
-        _db.session.add(u)
-        _db.session.commit()
-        entry = Company(user_id=u.id, ticker='XYZ')
+        entry = Company(ticker='XYZ')
         _db.session.add(entry)
         _db.session.commit()
 

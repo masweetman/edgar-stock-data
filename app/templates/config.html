@@ -28,16 +28,6 @@
       </div>
 
       <div class="mb-3">
-        {{ form.years.label(class="form-label") }}
-        {{ form.years(class="form-control" + (" is-invalid" if form.years.errors else ""),
-                      rows="4", placeholder="2021\n2022\n2023") }}
-        <div class="form-text">{{ form.years.description }} EPS will be averaged across these years.</div>
-        {% for err in form.years.errors %}
-          <div class="invalid-feedback">{{ err }}</div>
-        {% endfor %}
-      </div>
-
-      <div class="mb-3">
         {{ form.discount_rate.label(class="form-label") }}
         {{ form.discount_rate(class="form-control" + (" is-invalid" if form.discount_rate.errors else ""),
                               step="0.001", min="0.01", max="0.30") }}

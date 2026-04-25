@@ -27,7 +27,7 @@ class TestApiFetch:
         tickers = {e['ticker'] for e in data['data']}
         assert 'AAPL' in tickers and 'MSFT' in tickers
 
-        entries = Company.query.filter_by(user_id=user.id).all()
+        entries = Company.query.all()
         assert len(entries) == 2
 
     def test_fetch_populates_buffett_fields(self, client, db, user, logged_in_client, mock_fetch_data):
@@ -56,7 +56,7 @@ class TestApiFetch:
             res = logged_in_client.post('/api/fetch')
         assert res.status_code == 200
         assert res.json['success'] is True
-        entry = Company.query.filter_by(user_id=user.id, ticker='AAPL').first()
+        entry = Company.query.filter_by(ticker='AAPL').first()
         assert entry is not None
         assert entry.intrinsic_value is None  # gracefully None, no crash
 

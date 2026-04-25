@@ -41,13 +41,12 @@ _CONCEPT_LT_DEBT_ALT = 'us-gaap:LongTermDebtNoncurrent'
 _CONCEPT_EQUITY = 'us-gaap:StockholdersEquity'
 
 
-def fetch_data(sec_email: str, tickers: list[str], years: list[str], verify_ssl: bool = True) -> dict[str, dict[str, Any]]:
+def fetch_data(sec_email: str, tickers: list[str], verify_ssl: bool = True) -> dict[str, dict[str, Any]]:
     """Fetch EPS, BVPS, and dividend data for a list of tickers from SEC EDGAR.
 
     Args:
         sec_email: Email address used to identify the requester to the SEC (legal requirement).
         tickers: List of stock ticker symbols (e.g. ['AAPL', 'MSFT']).
-        years: List of year strings to average EPS over (e.g. ['2021', '2022', '2023']).
         verify_ssl: Whether to verify SSL certificates. Should be True in production.
 
     Returns:
@@ -62,7 +61,7 @@ def fetch_data(sec_email: str, tickers: list[str], years: list[str], verify_ssl:
 
     logger.info('Setting SEC identity to: %s', sec_email)
     set_identity(sec_email)
-    logger.info('Fetching data for tickers: %s | years: %s', tickers, years)
+    logger.info('Fetching data for tickers: %s', tickers)
 
     results: dict[str, dict[str, Any]] = {}
 
@@ -71,13 +70,13 @@ def fetch_data(sec_email: str, tickers: list[str], years: list[str], verify_ssl:
         if not ticker:
             continue
         logger.info('--- Starting fetch for ticker: %s ---', ticker)
-        results[ticker] = _fetch_ticker(ticker, years)
+        results[ticker] = _fetch_ticker(ticker)
         logger.info('--- Finished fetch for ticker: %s | result: %s ---', ticker, results[ticker])
 
     return results
 
 
-def _fetch_ticker(ticker: str, years: list[str]) -> dict[str, Any]:
+def _fetch_ticker(ticker: str) -> dict[str, Any]:
     """Fetch data for a single ticker. Returns a dict with the fetched fields."""
     from edgar import Company
 
@@ -131,8 +130,8 @@ def _fetch_ticker(ticker: str, years: list[str]) -> dict[str, Any]:
 
     logger.info('[%s] Facts loaded: %d rows', ticker, len(df))
 
-    # --- EPS (average diluted EPS across requested years) ---
-    entry['eps_avg'] = _get_eps_avg(df, years, ticker)
+    # --- EPS (average diluted EPS across the 6 most recent calendar years) ---
+    entry['eps_avg'] = _get_eps_avg(df, ticker)
     logger.info('[%s] EPS avg: %s', ticker, entry['eps_avg'])
 
     # --- Book Value Per Share ---
@@ -175,12 +174,13 @@ def _fetch_ticker(ticker: str, years: list[str]) -> dict[str, Any]:
     return entry
 
 
-def _get_eps_avg(df, years: list[str], ticker: str = '') -> float | None:
-    """Return the average annual diluted EPS over the requested years.
+def _get_eps_avg(df, ticker: str = '') -> float | None:
+    """Return the average annual diluted EPS over the 6 most recent calendar years.
 
     Filters the facts dataframe for us-gaap:EarningsPerShareDiluted with
     fiscal_period == 'FY'. Deduplicates by taking the latest period_end
-    per fiscal_year, then averages over the requested years.
+    per fiscal_year, then averages over the 6 most recent calendar years
+    (current year inclusive).
     """
     try:
         eps_df = df[
@@ -201,15 +201,16 @@ def _get_eps_avg(df, years: list[str], ticker: str = '') -> float | None:
         logger.info('[%s][EPS] Annual EPS by year:\n%s', ticker,
                     eps_by_year[['fiscal_year', 'numeric_value']].to_string(index=False))
 
-        year_ints = [int(y) for y in years]
+        current_year = date.today().year
+        year_ints = list(range(current_year - 5, current_year + 1))
         matched = eps_by_year[eps_by_year['fiscal_year'].isin(year_ints)]['numeric_value'].dropna()
 
         if matched.empty:
-            logger.info('[%s][EPS] No EPS values found for requested years: %s', ticker, years)
+            logger.info('[%s][EPS] No EPS values found for years: %s', ticker, year_ints)
             return None
 
         avg = round(float(matched.mean()), 2)
-        logger.info('[%s][EPS] Average EPS over %s: %s', ticker, years, avg)
+        logger.info('[%s][EPS] Average EPS over %s: %s', ticker, year_ints, avg)
         return avg
     except Exception as exc:
         logger.warning('[%s][EPS] Failed: %s: %s', ticker, type(exc).__name__, exc)

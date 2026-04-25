@@ -52,11 +52,6 @@ class ConfigForm(FlaskForm):
         validators=[DataRequired()],
         description='One ticker per line (e.g. AAPL).',
     )
-    years = TextAreaField(
-        'Years',
-        validators=[DataRequired()],
-        description='One year per line (e.g. 2022).',
-    )
     discount_rate = DecimalField(
         'Discount Rate',
         validators=[

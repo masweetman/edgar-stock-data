@@ -44,7 +44,6 @@ def user(db):
     db.session.commit()
     cfg = UserConfig(user_id=u.id, sec_email='test@example.com')
     cfg.tickers = ['AAPL', 'MSFT']
-    cfg.years = ['2022', '2023']
     db.session.add(cfg)
     db.session.commit()
     return u

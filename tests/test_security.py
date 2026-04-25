@@ -53,50 +53,53 @@ class TestUnauthenticatedAccess:
 
 
 class TestCrossUserIsolation:
-    """User A must not be able to see or affect User B's data."""
+    """Users only see tickers they have configured. The /company/<ticker> route
+    enforces a 403 for tickers not in the user's config."""
 
-    def _create_user(self, db, username, email):
+    def _create_user(self, db, username, email, tickers):
         u = User(username=username, email=email)
         u.set_password('password123')
         _db.session.add(u)
         _db.session.commit()
         cfg = UserConfig(user_id=u.id, sec_email=email)
-        cfg.tickers = ['TSLA']
-        cfg.years = ['2023']
+        cfg.tickers = tickers
         _db.session.add(cfg)
-        # Add a stock entry owned by this user
-        entry = Company(user_id=u.id, ticker='TSLA', eps_avg=1.23)
-        _db.session.add(entry)
         _db.session.commit()
         return u
 
-    def test_user_cannot_see_other_users_data(self, client, db):
-        user_a = self._create_user(db, 'user_a', 'a@example.com')
-        user_b = self._create_user(db, 'user_b', 'b@example.com')
+    def test_user_cannot_access_ticker_not_in_their_config(self, client, db):
+        # user_a watches TSLA; user_b watches AAPL (not TSLA)
+        self._create_user(db, 'user_a', 'a@example.com', ['TSLA'])
+        self._create_user(db, 'user_b', 'b@example.com', ['AAPL'])
 
-        # Login as user_a
-        _login(client, 'user_a', 'password123')
+        # Add the shared Company row for TSLA
+        entry = Company(ticker='TSLA', eps_avg=1.23)
+        _db.session.add(entry)
+        _db.session.commit()
+
+        # Login as user_b (who does NOT have TSLA configured)
+        _login(client, 'user_b', 'password123')
+
+        # user_b's dashboard should not show TSLA
         res = client.get('/dashboard')
         assert res.status_code == 200
-        # user_a sees their own TSLA entry
+        assert b'TSLA' not in res.data
+
+        # user_b should get 403 when trying to navigate directly to /company/TSLA
+        res = client.get('/company/TSLA')
+        assert res.status_code == 403
+
+    def test_user_sees_their_configured_ticker_on_dashboard(self, client, db):
+        self._create_user(db, 'user_c', 'c@example.com', ['TSLA'])
+
+        entry = Company(ticker='TSLA', eps_avg=1.23)
+        _db.session.add(entry)
+        _db.session.commit()
+
+        _login(client, 'user_c', 'password123')
+        res = client.get('/dashboard')
+        assert res.status_code == 200
         assert b'TSLA' in res.data
-
-        # The StockDataEntry for user_b should NOT appear in user_a's response
-        b_entry_id = Company.query.filter_by(user_id=user_b.id).first().id
-        assert str(b_entry_id).encode() not in res.data or True  # ID not directly shown; check username
-        # More robustly: fetch returns only user_a's data
-        from unittest.mock import patch
-        with patch('app.views.fetch_data') as mock_fetch:
-            mock_fetch.return_value = {'TSLA': {'cik': '1', 'eps_avg': 9.99, 'bvps': None,
-                                                 'div': None, 'div_date': None, 'error': None}}
-            fetch_res = client.post('/api/fetch')
-
-        assert fetch_res.status_code == 200
-        created = Company.query.filter_by(user_id=user_a.id, eps_avg=9.99).first()
-        assert created is not None
-        # user_b's entry must not be modified
-        b_entry = Company.query.filter_by(user_id=user_b.id).first()
-        assert b_entry.eps_avg == 1.23
 
 
 class TestSQLInjection:

@@ -45,7 +45,7 @@ class AdminModelView(ModelView):
 
 class UserAdminView(AdminModelView):
     column_exclude_list = ('password_hash', 'two_factor_secret')
-    form_excluded_columns = ('password_hash', 'two_factor_secret', 'created_at', 'config', 'stock_data')
+    form_excluded_columns = ('password_hash', 'two_factor_secret', 'created_at', 'config')
     can_create = False
 
 
