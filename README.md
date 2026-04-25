@@ -67,13 +67,140 @@ Tests use an in-memory SQLite database and mock all SEC EDGAR network calls.
 
 ## Production deployment
 
-Run with Gunicorn behind a reverse proxy (e.g. nginx):
+The application is served by **Gunicorn** on a Unix socket and fronted by **OpenLiteSpeed** as the reverse proxy. A systemd unit file is provided in `deploy/edgar-stock-data.service`.
+
+### Prerequisites
+
+- Python 3.11+
+- OpenLiteSpeed installed and running
+- A domain name with DNS pointed at the server
+
+### 1. Create the app directory and user
 
 ```bash
-gunicorn -w 4 "run:app"
+sudo mkdir -p /srv/edgar-stock-data
+sudo chown nobody:nogroup /srv/edgar-stock-data
 ```
 
-Set `FLASK_CONFIG=production` and `SESSION_COOKIE_SECURE=True` in your environment. Serve only over HTTPS.
+> `nobody` is the default user/group for OpenLiteSpeed on Debian/Ubuntu. Adjust if your distro differs (e.g. `nobody` on CentOS/RHEL, or a custom OLS service account).
+
+### 2. Clone the repository and set up the virtual environment
+
+```bash
+sudo -u nobody git clone <repo-url> /srv/edgar-stock-data
+cd /srv/edgar-stock-data
+sudo -u nobody python3 -m venv .venv
+sudo -u nobody .venv/bin/pip install -r requirements.txt
+```
+
+### 3. Configure the production environment
+
+```bash
+sudo -u nobody cp .env.example .env
+sudo -u nobody nano .env
+```
+
+Required values in `.env`:
+
+```ini
+SECRET_KEY=<long-random-string>     # generate with: python3 -c "import secrets; print(secrets.token_hex(32))"
+FLASK_CONFIG=production
+SESSION_COOKIE_SECURE=True
+```
+
+### 4. Create the log directory
+
+```bash
+sudo mkdir -p /var/log/edgar-stock-data
+sudo chown nobody:nogroup /var/log/edgar-stock-data
+```
+
+### 5. Install and start the systemd service
+
+```bash
+sudo cp /srv/edgar-stock-data/deploy/edgar-stock-data.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now edgar-stock-data
+```
+
+Verify it is running:
+
+```bash
+sudo systemctl status edgar-stock-data
+```
+
+The Unix socket is created at `/run/edgar-stock-data/gunicorn.sock`.
+
+To reload workers after a code update without dropping connections:
+
+```bash
+sudo systemctl reload edgar-stock-data
+```
+
+### 6. Configure OpenLiteSpeed
+
+All steps are performed in the **OpenLiteSpeed Web Admin** console (default: `https://<server-ip>:7080`).
+
+#### 6a. Create an External App
+
+1. Go to **Virtual Hosts → \<your vhost\> → External Apps** → click **+**
+2. Set the fields:
+
+   | Field | Value |
+   |---|---|
+   | Type | Web Server |
+   | Name | `edgar-gunicorn` |
+   | Address | `uds://run/edgar-stock-data/gunicorn.sock` |
+   | Max Connections | `10` |
+   | Initial Request Timeout | `120` |
+   | Retry Timeout | `0` |
+
+3. Click **Save**.
+
+#### 6b. Add a Proxy Context
+
+1. Go to **Virtual Hosts → \<your vhost\> → Context** → click **+**
+2. Set the fields:
+
+   | Field | Value |
+   |---|---|
+   | Type | Proxy |
+   | URI | `/` |
+   | Web Server | `edgar-gunicorn` |
+
+3. Click **Save**.
+
+#### 6c. Configure the Virtual Host document root
+
+1. Go to **Virtual Hosts → \<your vhost\> → General**
+2. Set **Document Root** to `/srv/edgar-stock-data/app/static`
+
+   > This is only used if you later serve static files directly from OLS. With a pure proxy context the Flask app handles static files.
+
+#### 6d. Enable HTTPS
+
+1. Go to **Listeners** and ensure you have an HTTPS listener on port 443 with your SSL certificate configured.
+2. Add your virtual host to that listener.
+3. To redirect HTTP → HTTPS, go to **Virtual Hosts → \<your vhost\> → Rewrite** and enable rewrite rules:
+
+   ```
+   RewriteEngine on
+   RewriteCond %{SERVER_PORT} !^443$
+   RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+   ```
+
+4. Click **Save** and then **Graceful Restart** (the green restart button in the top-right corner).
+
+### Updating the application
+
+```bash
+cd /srv/edgar-stock-data
+sudo -u nobody git pull
+sudo -u nobody .venv/bin/pip install -r requirements.txt
+sudo systemctl reload edgar-stock-data
+```
+
+Database migrations are applied automatically on startup when `FLASK_CONFIG=production`. A `systemctl reload` sends `SIGHUP` to Gunicorn, which spawns fresh workers that pick up code and migration changes with no downtime.
 
 ## Project structure
 

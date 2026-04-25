@@ -1,0 +1,35 @@
+[Unit]
+Description=edgar-stock-data gunicorn daemon
+After=network.target
+
+[Service]
+Type=notify
+User=nobody
+Group=nogroup
+
+WorkingDirectory=/srv/edgar-stock-data
+EnvironmentFile=/srv/edgar-stock-data/.env
+Environment=FLASK_CONFIG=production
+
+# systemd creates /run/edgar-stock-data/ and removes it on stop
+RuntimeDirectory=edgar-stock-data
+RuntimeDirectoryMode=0750
+
+ExecStart=/srv/edgar-stock-data/.venv/bin/gunicorn \
+    --workers 4 \
+    --timeout 120 \
+    --bind unix:/run/edgar-stock-data/gunicorn.sock \
+    --umask 007 \
+    --access-logfile /var/log/edgar-stock-data/access.log \
+    --error-logfile /var/log/edgar-stock-data/error.log \
+    run:app
+
+ExecReload=/bin/kill -s HUP $MAINPID
+KillMode=mixed
+TimeoutStopSec=5
+PrivateTmp=true
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
