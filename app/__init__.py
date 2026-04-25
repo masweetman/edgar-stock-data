@@ -10,7 +10,7 @@ from flask_limiter.util import get_remote_address
 from flask_login import LoginManager
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
-from flask_wtf.csrf import CSRFProtect
+from flask_wtf.csrf import CSRFError, CSRFProtect
 
 from app.configuration import config_map
 
@@ -72,6 +72,12 @@ def create_app(config_name: str | None = None) -> Flask:
         return response
 
     # Error handlers
+    @app.errorhandler(CSRFError)
+    def csrf_error(e):
+        if request.path.startswith('/api/'):
+            return jsonify({'success': False, 'error': 'CSRF validation failed. Refresh the page and try again.'}), 400
+        return e
+
     @app.errorhandler(400)
     def bad_request(e):
         if request.path.startswith('/api/'):

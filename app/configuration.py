@@ -35,6 +35,10 @@ class TestingConfig(Config):
 
 class ProductionConfig(Config):
     SESSION_COOKIE_SECURE = True
+    # Cloudflare strips/rewrites the Referer header, so the strict HTTPS
+    # Referer check in Flask-WTF must be disabled. The cryptographic CSRF
+    # token validation (X-CSRFToken header) still runs.
+    WTF_CSRF_SSL_STRICT = False
 
 
 config_map = {
