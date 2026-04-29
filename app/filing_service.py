@@ -116,13 +116,27 @@ def fetch_latest_filings(
         ticker_dir = Path(storage_path) / ticker
         ticker_dir.mkdir(parents=True, exist_ok=True)
         abs_pdf_path = ticker_dir / filename
+        rel_path = str(Path(ticker) / filename)
+
+        if abs_pdf_path.exists():
+            logger.info(
+                '[%s] %s PDF already exists, skipping download: %s',
+                ticker, form, abs_pdf_path,
+            )
+            results.append({
+                'filing_type': form,
+                'filing_date': meta['filing_date'],
+                'report_date': report_date,
+                'accession_number': meta['accession_number'],
+                'filing_path': rel_path,
+            })
+            continue
 
         logger.info('[%s] Downloading %s → %s', ticker, form, abs_pdf_path)
         success = _html_to_pdf(filing_url, str(abs_pdf_path), ticker, headers)
 
         if success:
             # Store path relative to storage_path so it's portable
-            rel_path = str(Path(ticker) / filename)
             results.append({
                 'filing_type': form,
                 'filing_date': meta['filing_date'],
