@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 from app.edgar_service import (
     _annualise_dividend,
+    _correct_shares_scale,
     _get_dividends,
     _latest_annual_value_with_fallbacks,
 )
@@ -220,3 +221,45 @@ class TestLatestAnnualValueWithFallbacks:
         df = _make_facts_df('us-gaap:LongTermDebt', 1_000.0)
         result = _latest_annual_value_with_fallbacks(df, [], 'TEST')
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# _correct_shares_scale
+# ---------------------------------------------------------------------------
+
+class TestCorrectSharesScale:
+    def test_mcd_style_millions_scaling(self):
+        # MCD: shares filed as 713.4 (millions), net_income=8_563_000_000, eps=11.95
+        result = _correct_shares_scale(713.4, 11.95, 8_563_000_000.0, 'MCD')
+        assert result == pytest.approx(713_400_000.0, rel=1e-4)
+
+    def test_thousands_scaling(self):
+        # Shares filed in thousands: 5_000 → 5_000_000
+        result = _correct_shares_scale(5_000.0, 2.00, 10_000_000_000.0, 'TEST')
+        assert result == pytest.approx(5_000_000_000.0, rel=1e-4)
+
+    def test_no_correction_when_ratio_below_threshold(self):
+        # Full-count shares: 713_400_000, ratio ~1 — no correction
+        result = _correct_shares_scale(713_400_000.0, 11.95, 8_563_000_000.0, 'MCD')
+        assert result == pytest.approx(713_400_000.0, rel=1e-4)
+
+    def test_returns_none_when_raw_shares_none(self):
+        result = _correct_shares_scale(None, 11.95, 8_563_000_000.0, 'MCD')
+        assert result is None
+
+    def test_returns_raw_when_eps_none(self):
+        result = _correct_shares_scale(713.4, None, 8_563_000_000.0, 'MCD')
+        assert result == 713.4
+
+    def test_returns_raw_when_net_income_none(self):
+        result = _correct_shares_scale(713.4, 11.95, None, 'MCD')
+        assert result == 713.4
+
+    def test_returns_raw_when_eps_is_zero(self):
+        result = _correct_shares_scale(713.4, 0.0, 8_563_000_000.0, 'MCD')
+        assert result == 713.4
+
+    def test_loss_company_corrected(self):
+        # Negative EPS and net income — abs values used, correction still applies
+        result = _correct_shares_scale(500.0, -3.00, -1_500_000_000.0, 'LOSS')
+        assert result == pytest.approx(500_000_000.0, rel=1e-4)

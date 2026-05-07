@@ -11,6 +11,7 @@ Annual facts are identified by fiscal_period == 'FY'.
 """
 
 import logging
+import math
 import statistics
 from datetime import date
 from typing import Any
@@ -156,8 +157,23 @@ def _fetch_ticker(ticker: str) -> dict[str, Any]:
     entry['eps_history'] = _get_annual_series(df, _CONCEPT_EPS_DILUTED, ticker)
     logger.info('[%s] EPS history: %s', ticker, entry['eps_history'])
 
+    # --- Shares outstanding (computed early so BVPS can use the corrected value) ---
+    _raw_shares = (
+        _latest_annual_value(df, _CONCEPT_SHARES_BASIC, ticker)
+        or _latest_annual_value(df, _CONCEPT_SHARES_OUTSTANDING, ticker)
+    )
+    _latest_eps = (
+        entry['eps_history'].get(max(entry['eps_history']))
+        if entry['eps_history'] else None
+    )
+    _latest_net_income = _latest_annual_value(df, _CONCEPT_NET_INCOME, ticker)
+    entry['shares_outstanding'] = _correct_shares_scale(
+        _raw_shares, _latest_eps, _latest_net_income, ticker
+    )
+    logger.info('[%s] Shares outstanding: %s', ticker, entry['shares_outstanding'])
+
     # --- Book Value Per Share ---
-    entry['bvps'] = _get_bvps(df, ticker)
+    entry['bvps'] = _get_bvps(df, ticker, shares=entry['shares_outstanding'])
     logger.info('[%s] BVPS: %s', ticker, entry['bvps'])
 
     # --- Dividends ---
@@ -201,10 +217,6 @@ def _fetch_ticker(ticker: str) -> dict[str, Any]:
     entry['op_cashflow_history'] = _get_annual_series(df, _CONCEPT_OP_CASHFLOW, ticker)
     entry['equity'] = _latest_annual_value(df, _CONCEPT_EQUITY, ticker)
     entry['equity_history'] = _get_annual_series(df, _CONCEPT_EQUITY, ticker)
-    entry['shares_outstanding'] = (
-        _latest_annual_value(df, _CONCEPT_SHARES_BASIC, ticker)
-        or _latest_annual_value(df, _CONCEPT_SHARES_OUTSTANDING, ticker)
-    )
     # Derive net debt for the EV→Equity bridge.
     # Negative means net-cash (cash exceeds total debt) — this is meaningful and preserved.
     lt_debt = entry['long_term_debt'] or 0.0
@@ -288,11 +300,14 @@ def _get_eps_avg(df, ticker: str = '') -> float | None:
         return None
 
 
-def _get_bvps(df, ticker: str = '') -> float | None:
+def _get_bvps(df, ticker: str = '', shares: float | None = None) -> float | None:
     """Calculate Book Value Per Share from the most recent annual facts.
 
     Uses us-gaap:Assets, us-gaap:Liabilities, and shares outstanding.
     BVPS = (Assets - Liabilities) / Shares
+
+    If *shares* is provided (already scale-corrected), it is used directly
+    instead of fetching from the dataframe.
     """
     try:
         assets = _latest_annual_value(df, _CONCEPT_ASSETS, ticker)
@@ -305,9 +320,10 @@ def _get_bvps(df, ticker: str = '') -> float | None:
             if curr is not None:
                 liabilities = curr + (noncurr or 0.0)
 
-        shares = _latest_annual_value(df, _CONCEPT_SHARES_BASIC, ticker)
         if shares is None:
-            shares = _latest_annual_value(df, _CONCEPT_SHARES_OUTSTANDING, ticker)
+            shares = _latest_annual_value(df, _CONCEPT_SHARES_BASIC, ticker)
+            if shares is None:
+                shares = _latest_annual_value(df, _CONCEPT_SHARES_OUTSTANDING, ticker)
 
         logger.info('[%s][BVPS] Assets: %s | Liabilities: %s | Shares: %s',
                     ticker, assets, liabilities, shares)
@@ -322,6 +338,57 @@ def _get_bvps(df, ticker: str = '') -> float | None:
         logger.warning('[%s][BVPS] Failed: %s: %s', ticker, type(exc).__name__, exc)
 
     return None
+
+
+def _correct_shares_scale(
+    raw_shares: float | None,
+    latest_eps: float | None,
+    latest_net_income: float | None,
+    ticker: str = '',
+) -> float | None:
+    """Detect and correct shares that were filed with an XBRL scale attribute.
+
+    Some filers submit WeightedAverageNumberOfSharesOutstandingBasic with a
+    scale tag (e.g. scale=6 for millions), so the SEC stores 713.4 instead of
+    713_400_000.  USD-denominated concepts (NetIncomeLoss, Assets, etc.) are
+    always filed as full dollar values, so we cross-validate using EPS:
+
+        implied_shares = |net_income| / |eps|
+
+    If implied_shares / raw_shares >= 100 we apply the nearest power-of-10
+    multiplier (restricted to 10^3, 10^6, or 10^9) to avoid spurious fixes.
+    Returns raw_shares unchanged when the check cannot be performed.
+    """
+    if raw_shares is None or raw_shares <= 0:
+        return raw_shares
+    if not latest_eps or not latest_net_income:
+        return raw_shares
+    if abs(latest_eps) < 1e-9:
+        return raw_shares
+
+    implied = abs(latest_net_income) / abs(latest_eps)
+    ratio = implied / raw_shares
+
+    if ratio < 100:
+        return raw_shares
+
+    # Determine the nearest valid power-of-10 multiplier
+    exponent = round(math.log10(ratio))
+    if exponent not in (3, 6, 9):
+        logger.warning(
+            '[%s][SHARES] Unexpected scale ratio %.1f (exponent %d) — skipping correction',
+            ticker, ratio, exponent,
+        )
+        return raw_shares
+
+    multiplier = 10 ** exponent
+    corrected = raw_shares * multiplier
+    logger.warning(
+        '[%s][SHARES] Scale correction applied: %.4g × %d = %.0f '
+        '(implied %.0f from net_income=%.0f / eps=%.4f)',
+        ticker, raw_shares, multiplier, corrected, implied, latest_net_income, latest_eps,
+    )
+    return corrected
 
 
 def _annualise_dividend(val: float, period_start, period_end, ticker: str = '') -> float | None:
